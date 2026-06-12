@@ -1,0 +1,2484 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Release Risk Copilot — Release Decision Support Sandbox</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#172033',
+                            900: '#0f172a',
+                            925: '#0b1322',
+                            950: '#060a14'
+                        },
+                        ink: '#03060d'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'Fira Code', 'Courier New', 'monospace']
+                    },
+                    boxShadow: {
+                        'glow-emerald': '0 0 24px -6px rgba(16,185,129,0.35)',
+                        'glow-rose': '0 0 24px -6px rgba(244,63,94,0.35)',
+                        'glow-amber': '0 0 24px -6px rgba(245,158,11,0.35)'
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #03060d;
+            background-image:
+                linear-gradient(rgba(30, 41, 59, 0.14) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(30, 41, 59, 0.14) 1px, transparent 1px);
+            background-size: 44px 44px;
+        }
+
+        .font-mono, .tabular { font-variant-numeric: tabular-nums; }
+
+        /* Scanline brand accent across the very top of the console */
+        .scanline {
+            height: 2px;
+            background: linear-gradient(90deg, transparent 0%, #10b981 18%, #34d399 50%, #10b981 82%, transparent 100%);
+            opacity: 0.8;
+        }
+
+        /* Corner-bracket framing for the verdict hero — the one signature element */
+        .bracket-frame { position: relative; }
+        .bracket-frame::before, .bracket-frame::after {
+            content: '';
+            position: absolute;
+            width: 14px; height: 14px;
+            border-color: rgba(148, 163, 184, 0.55);
+            border-style: solid;
+        }
+        .bracket-frame::before { top: -1px; left: -1px; border-width: 2px 0 0 2px; }
+        .bracket-frame::after  { bottom: -1px; right: -1px; border-width: 0 2px 2px 0; }
+        .bracket-go::before, .bracket-go::after { border-color: rgba(16, 185, 129, 0.8); }
+        .bracket-hold::before, .bracket-hold::after { border-color: rgba(245, 158, 11, 0.8); }
+        .bracket-block::before, .bracket-block::after { border-color: rgba(244, 63, 94, 0.8); }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #060a14; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #334155; }
+        .custom-scrollbar { scrollbar-width: thin; scrollbar-color: #1e293b #060a14; }
+
+        /* Accessible focus treatment for every interactive element */
+        :focus-visible {
+            outline: 2px solid #34d399;
+            outline-offset: 2px;
+            border-radius: 8px;
+        }
+
+        /* Range inputs */
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 6px;
+            border-radius: 6px;
+            background: linear-gradient(90deg, rgba(16,185,129,0.45), rgba(16,185,129,0.12));
+            cursor: pointer;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: #10b981;
+            border: 2px solid #03060d;
+            box-shadow: 0 0 0 1px rgba(16,185,129,0.5);
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 14px; height: 14px;
+            border-radius: 50%;
+            background: #10b981;
+            border: 2px solid #03060d;
+        }
+
+        input[type="checkbox"] { accent-color: #10b981; }
+
+        @keyframes nodepulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(16,185,129,0.0); }
+            50% { box-shadow: 0 0 18px -4px rgba(16,185,129,0.45); }
+        }
+        .node-running { animation: nodepulse 1.4s ease-in-out infinite; }
+
+        @media (prefers-reduced-motion: reduce) {
+            *, *::before, *::after {
+                animation: none !important;
+                transition: none !important;
+            }
+        }
+    </style>
+</head>
+<body class="bg-ink text-slate-100 min-h-screen flex flex-col antialiased selection:bg-emerald-500/30 selection:text-emerald-200">
+
+    <div class="scanline" aria-hidden="true"></div>
+
+    <!-- ============================= HEADER ============================= -->
+    <header class="border-b border-slate-900 bg-slate-950/85 backdrop-blur sticky top-0 z-50 px-4 md:px-6 py-3.5 flex flex-col xl:flex-row items-start xl:items-center justify-between gap-3">
+        <div class="flex items-center gap-3">
+            <div class="h-9 w-9 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold text-lg font-mono tracking-tight shrink-0" aria-hidden="true">
+                R▲
+            </div>
+            <div>
+                <div class="flex items-center gap-2 flex-wrap">
+                    <h1 class="text-base md:text-lg font-bold text-slate-100 tracking-tight">AI Release Risk Copilot</h1>
+                    <span class="px-2 py-0.5 text-[10px] font-semibold bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20 uppercase tracking-wide">Evaluation Engine</span>
+                </div>
+                <p class="text-[11px] text-slate-400">Go / No-Go decision support for frontier model launches</p>
+            </div>
+        </div>
+        <div class="flex flex-wrap items-center gap-3 w-full xl:w-auto">
+            <nav role="tablist" aria-label="Workspace sections" class="flex flex-wrap items-center gap-1 bg-slate-925/80 p-1 rounded-xl border border-slate-900 w-full md:w-auto">
+                <button role="tab" aria-selected="true" aria-controls="tab-simulator" onclick="switchTab('simulator')" id="btn-simulator" class="tab-btn flex-1 md:flex-none px-3 py-2 rounded-lg text-[11px] font-semibold transition-all bg-slate-800 text-emerald-300 border border-slate-700">
+                    Interactive Simulator
+                </button>
+                <button role="tab" aria-selected="false" aria-controls="tab-capability" onclick="switchTab('capability')" id="btn-capability" class="tab-btn flex-1 md:flex-none px-3 py-2 rounded-lg text-[11px] font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+                    Capability Surface Map
+                </button>
+                <button role="tab" aria-selected="false" aria-controls="tab-evals" onclick="switchTab('evals')" id="btn-evals" class="tab-btn flex-1 md:flex-none px-3 py-2 rounded-lg text-[11px] font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+                    Evaluation Benchmarker
+                </button>
+                <button role="tab" aria-selected="false" aria-controls="tab-financials" onclick="switchTab('financials')" id="btn-financials" class="tab-btn flex-1 md:flex-none px-3 py-2 rounded-lg text-[11px] font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+                    Gross Margin Modeler
+                </button>
+                <button role="tab" aria-selected="false" aria-controls="tab-registry" onclick="switchTab('registry')" id="btn-registry" class="tab-btn flex-1 md:flex-none px-3 py-2 rounded-lg text-[11px] font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent">
+                    Contracts &amp; Registry
+                </button>
+            </nav>
+            <div class="h-6 w-px bg-slate-800 hidden xl:block" aria-hidden="true"></div>
+            <span class="text-[11px] text-slate-500 font-mono flex items-center gap-1.5 ml-auto md:ml-0">
+                <span class="h-2 w-2 rounded-full bg-amber-400/80 inline-block" aria-hidden="true"></span>
+                <span>Sandbox engine · simulated data</span>
+            </span>
+        </div>
+    </header>
+
+    <main class="flex-1 flex flex-col">
+
+        <!-- ============================= TAB 1: INTERACTIVE SIMULATOR ============================= -->
+        <section id="tab-simulator" role="tabpanel" aria-labelledby="btn-simulator" class="tab-content flex-1 grid grid-cols-1 xl:grid-cols-12 gap-0 xl:h-[calc(100vh-8.6rem)] xl:min-h-[660px] xl:overflow-hidden">
+
+            <!-- ───────── Left Column: Scenarios & Controls ───────── -->
+            <div class="xl:col-span-3 border-b xl:border-b-0 xl:border-r border-slate-900 bg-slate-950 p-5 flex flex-col gap-5 xl:overflow-y-auto custom-scrollbar">
+                <div>
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">1 · Release Incident Profile</h2>
+                        <span class="text-[10px] text-indigo-400 font-mono font-bold bg-indigo-500/10 px-1.5 py-0.5 rounded border border-indigo-500/20">TARGET MATRIX</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mb-3.5 leading-relaxed">Initialize a candidate evaluation seeded with a specific operational failure, then run the pipeline to verify the gates catch it.</p>
+                    <div class="grid grid-cols-1 gap-2.5">
+                        <button onclick="selectUsecase('copilot')" id="uc-copilot" class="usecase-card p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-left transition-all hover:bg-slate-900">
+                            <div class="flex items-start justify-between gap-2 mb-1">
+                                <span class="uc-title font-semibold text-xs text-slate-100">Scenario A · Hidden US/UK Enterprise Regression</span>
+                                <span class="text-[9px] bg-rose-500/15 text-rose-400 px-1.5 py-0.5 rounded-md font-mono uppercase font-bold shrink-0">Slice Trap</span>
+                            </div>
+                            <p class="text-[11px] text-slate-400 leading-normal">Aggregate frontier benchmarks improve, but US/UK enterprise workflow slices regress in high-stakes domains.</p>
+                        </button>
+
+                        <button onclick="selectUsecase('compliance')" id="uc-compliance" class="usecase-card p-3 rounded-xl border border-slate-900 bg-slate-950/40 text-left transition-all hover:bg-slate-900 hover:border-slate-800">
+                            <div class="flex items-start justify-between gap-2 mb-1">
+                                <span class="uc-title font-semibold text-xs text-slate-400">Scenario B · Safety Threshold Guardrail Breach</span>
+                                <span class="text-[9px] bg-amber-500/10 text-amber-400 px-1.5 py-0.5 rounded-md font-mono uppercase font-bold shrink-0">Policy Break</span>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-normal">Fine-tuned candidate fails structural safety consistency criteria during adversarial policy stress-tests.</p>
+                        </button>
+
+                        <button onclick="selectUsecase('memo')" id="uc-memo" class="usecase-card p-3 rounded-xl border border-slate-900 bg-slate-950/40 text-left transition-all hover:bg-slate-900 hover:border-slate-800">
+                            <div class="flex items-start justify-between gap-2 mb-1">
+                                <span class="uc-title font-semibold text-xs text-slate-400">Scenario C · Standard Release Profile</span>
+                                <span class="text-[9px] bg-blue-500/10 text-blue-400 px-1.5 py-0.5 rounded-md font-mono uppercase font-bold shrink-0">Clean Run</span>
+                            </div>
+                            <p class="text-[11px] text-slate-500 leading-normal">Candidate meets all baseline thresholds. Automated test loops register healthy operational stability.</p>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="border-t border-slate-900 pt-4">
+                    <h2 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-3">2 · Execution Controls</h2>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label for="input-tokens" class="block text-xs font-semibold text-slate-400 mb-1.5">Input Context Spec (tokens)</label>
+                            <div class="flex items-center gap-3">
+                                <input type="range" id="input-tokens" min="10000" max="500000" step="10000" value="180000" oninput="updateTokenSlider(this.value)" aria-label="Input context size in tokens" class="flex-1">
+                                <span id="token-display" class="font-mono text-xs text-emerald-400 bg-emerald-500/5 border border-emerald-500/20 px-2 py-1 rounded w-[5.2rem] text-center tabular">180,000</span>
+                            </div>
+                            <p class="text-[10px] text-slate-500 mt-1.5">Above <span class="font-mono text-slate-400">200,000</span> tokens, the long-context ingestion router engages automatically.</p>
+                        </div>
+
+                        <div>
+                            <label for="deliverable-type" class="block text-xs font-semibold text-slate-400 mb-1.5">Target Deliverable Format</label>
+                            <select id="deliverable-type" class="w-full bg-slate-925 border border-slate-800 rounded-lg px-3 py-2 text-xs text-slate-300 focus:outline-none focus:ring-1 focus:ring-emerald-500">
+                                <option value="executive_memo">Board-Ready Executive Risk Memo (prose specialist)</option>
+                                <option value="structured_json">Structured Release Config JSON (strict schema only)</option>
+                            </select>
+                        </div>
+
+                        <!-- Failure-mode injection -->
+                        <fieldset class="bg-slate-925/60 border border-slate-900 rounded-xl p-4 space-y-3">
+                            <legend class="sr-only">Failure mode injection</legend>
+                            <h3 class="text-xs font-bold text-slate-300 flex items-center justify-between">
+                                <span>Inject Failure Modes</span>
+                                <span class="text-[10px] text-slate-500 font-normal">Stress the gates</span>
+                            </h3>
+
+                            <label class="flex items-center gap-2.5 cursor-pointer text-[11px] text-slate-400 font-mono">
+                                <input type="checkbox" id="fail-json" class="rounded border-slate-800 bg-slate-950 h-4 w-4">
+                                <span>L1 — Malformed JSON output <span class="text-slate-600">(triggers repair loop)</span></span>
+                            </label>
+
+                            <label class="flex items-center gap-2.5 cursor-pointer text-[11px] text-slate-400 font-mono">
+                                <input type="checkbox" id="fail-validation" class="rounded border-slate-800 bg-slate-950 h-4 w-4">
+                                <span>L2 — Citation verification failure <span class="text-slate-600">(escalates to human gate)</span></span>
+                            </label>
+                        </fieldset>
+
+                        <!-- Evidence confidence matrix -->
+                        <div class="bg-slate-925/60 border border-slate-900 rounded-xl p-4 space-y-2">
+                            <h3 class="text-xs font-bold text-slate-300">Evidence Confidence Matrix</h3>
+                            <p class="text-[10px] text-slate-500 leading-normal">Source classes are weighted before any claim enters the decision packet.</p>
+                            <div class="space-y-1.5 text-[10px] font-mono">
+                                <div class="flex justify-between items-center bg-slate-950/60 p-1.5 rounded border border-slate-900">
+                                    <span class="text-slate-400">Internal eval metrics</span>
+                                    <span class="text-emerald-400 bg-emerald-500/10 px-1.5 rounded border border-emerald-500/20">HIGH TRUST</span>
+                                </div>
+                                <div class="flex justify-between items-center bg-slate-950/60 p-1.5 rounded border border-slate-900">
+                                    <span class="text-slate-400">Production telemetry</span>
+                                    <span class="text-emerald-400 bg-emerald-500/10 px-1.5 rounded border border-emerald-500/20">HIGH TRUST</span>
+                                </div>
+                                <div class="flex justify-between items-center bg-slate-950/60 p-1.5 rounded border border-slate-900">
+                                    <span class="text-slate-400">Manually reviewed incidents</span>
+                                    <span class="text-amber-400 bg-amber-500/10 px-1.5 rounded border border-amber-500/20">MED TRUST</span>
+                                </div>
+                                <div class="flex justify-between items-center bg-slate-950/60 p-1.5 rounded border border-slate-900">
+                                    <span class="text-slate-400">Model-generated narratives</span>
+                                    <span class="text-rose-400 bg-rose-500/10 px-1.5 rounded border border-rose-500/20">LOW TRUST</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Run controls -->
+                <div class="border-t border-slate-900 pt-4 mt-auto">
+                    <button onclick="startSimulation()" id="run-btn" class="w-full bg-emerald-500 hover:bg-emerald-400 active:translate-y-px transition-all text-slate-950 font-bold py-3 px-4 rounded-xl flex items-center justify-center gap-2 text-xs shadow-glow-emerald disabled:opacity-40 disabled:cursor-not-allowed disabled:shadow-none">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z" />
+                        </svg>
+                        <span>Run Release Pipeline</span>
+                    </button>
+                    <button onclick="resetSimulation()" class="w-full text-slate-500 hover:text-slate-300 transition-colors text-[11px] py-2 mt-1 text-center underline underline-offset-2 font-mono">
+                        Reset sandbox
+                    </button>
+                </div>
+            </div>
+
+            <!-- ───────── Middle Column: Pipeline Flow & Decision Tree ───────── -->
+            <div class="xl:col-span-5 border-b xl:border-b-0 xl:border-r border-slate-900 bg-slate-950/50 p-5 flex flex-col gap-4 xl:overflow-y-auto custom-scrollbar">
+                <div class="flex items-center justify-between gap-2 flex-wrap">
+                    <div class="flex items-center gap-2">
+                        <h2 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pipeline Flow Analysis</h2>
+                        <span id="machine-status" class="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">IDLE</span>
+                    </div>
+                    <div class="flex bg-slate-925 p-0.5 rounded-lg border border-slate-800" role="group" aria-label="Middle panel view">
+                        <button onclick="toggleMiddleView('topology')" id="btn-mid-topology" class="text-[10px] font-mono px-2.5 py-1 rounded bg-slate-800 text-emerald-300 font-bold">STATE FLOW</button>
+                        <button onclick="toggleMiddleView('decision-graph')" id="btn-mid-graph" class="text-[10px] font-mono px-2.5 py-1 rounded text-slate-500 hover:text-slate-200">DECISION TREE</button>
+                    </div>
+                </div>
+
+                <!-- MIDDLE VIEW: STATE FLOW TOPOLOGY -->
+                <div id="mid-topology-view" class="bg-slate-950 border border-slate-900 rounded-2xl flex flex-col p-4 gap-0">
+                    <!-- Node 1 -->
+                    <div id="node-1" class="border border-slate-900 rounded-xl p-3 bg-slate-925/40 flex items-center justify-between transition-all duration-300">
+                        <div class="flex items-center gap-3">
+                            <div class="h-6 w-6 rounded bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">1</div>
+                            <div>
+                                <h3 class="text-xs font-semibold text-slate-300">State Initializer</h3>
+                                <p class="text-[10px] text-slate-500">Registers job ID, baseline &amp; immutable audit log</p>
+                            </div>
+                        </div>
+                        <span class="status-badge text-[9px] font-mono text-slate-500">IDLE</span>
+                    </div>
+                    <div class="w-px h-3 bg-slate-800 mx-auto" aria-hidden="true"></div>
+
+                    <!-- Node 2 -->
+                    <div id="node-2" class="border border-slate-900 rounded-xl p-3 bg-slate-925/40 flex items-center justify-between transition-all duration-300">
+                        <div class="flex items-center gap-3">
+                            <div class="h-6 w-6 rounded bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">2</div>
+                            <div>
+                                <h3 class="text-xs font-semibold text-slate-300">Long-Context Ingestion Router</h3>
+                                <p class="text-[10px] text-slate-500">Engages automatically when corpus &gt; 200k tokens</p>
+                            </div>
+                        </div>
+                        <span class="status-badge text-[9px] font-mono text-slate-500">BYPASSED</span>
+                    </div>
+                    <div class="w-px h-3 bg-slate-800 mx-auto" aria-hidden="true"></div>
+
+                    <!-- Node 3 -->
+                    <div id="node-3" class="border border-slate-900 rounded-xl p-3 bg-slate-925/40 flex items-center justify-between transition-all duration-300">
+                        <div class="flex items-center gap-3">
+                            <div class="h-6 w-6 rounded bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">3</div>
+                            <div>
+                                <h3 class="text-xs font-semibold text-slate-300">Primary Reasoning Worker</h3>
+                                <p class="text-[10px] text-slate-500">Maps regressions &amp; extracts citable facts</p>
+                            </div>
+                        </div>
+                        <span class="status-badge text-[9px] font-mono text-slate-500">IDLE</span>
+                    </div>
+                    <div class="w-px h-3 bg-slate-800 mx-auto" aria-hidden="true"></div>
+
+                    <!-- Node 4 -->
+                    <div id="node-4" class="border border-slate-900 rounded-xl p-3 bg-slate-925/40 flex items-center justify-between transition-all duration-300">
+                        <div class="flex items-center gap-3">
+                            <div class="h-6 w-6 rounded bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">4</div>
+                            <div>
+                                <h3 class="text-xs font-semibold text-slate-300">Constraint Validation Engine</h3>
+                                <p class="text-[10px] text-slate-500">Runs L1→L5 gates with bounded schema repair</p>
+                            </div>
+                        </div>
+                        <span class="status-badge text-[9px] font-mono text-slate-500">IDLE</span>
+                    </div>
+                    <div class="w-px h-3 bg-slate-800 mx-auto" aria-hidden="true"></div>
+
+                    <!-- Node 5 -->
+                    <div id="node-5" class="border border-slate-900 rounded-xl p-3 bg-slate-925/40 flex items-center justify-between transition-all duration-300">
+                        <div class="flex items-center gap-3">
+                            <div class="h-6 w-6 rounded bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">5</div>
+                            <div>
+                                <h3 class="text-xs font-semibold text-slate-300">Specialist Prose Synthesizer</h3>
+                                <p class="text-[10px] text-slate-500">Renders board-ready memo from validated state only</p>
+                            </div>
+                        </div>
+                        <span class="status-badge text-[9px] font-mono text-slate-500">IDLE</span>
+                    </div>
+                    <div class="w-px h-3 bg-slate-800 mx-auto" aria-hidden="true"></div>
+
+                    <!-- Node 6 -->
+                    <div id="node-6" class="border border-slate-900 rounded-xl p-3 bg-slate-925/40 flex items-center justify-between transition-all duration-300">
+                        <div class="flex items-center gap-3">
+                            <div class="h-6 w-6 rounded bg-slate-800 flex items-center justify-center text-[10px] text-slate-400 font-mono shrink-0">6</div>
+                            <div>
+                                <h3 class="text-xs font-semibold text-slate-300">Human Approval Triage Gate</h3>
+                                <p class="text-[10px] text-slate-500">Escalates on L2 citation failure · decisions recorded, never rewritten</p>
+                            </div>
+                        </div>
+                        <span class="status-badge text-[9px] font-mono text-slate-500">IDLE</span>
+                    </div>
+                </div>
+
+                <!-- MIDDLE VIEW: DECISION TREE GRAPH (fully computed from state) -->
+                <div id="mid-graph-view" class="hidden bg-slate-950 border border-slate-900 rounded-2xl p-4 flex-col font-mono text-[11px] space-y-3">
+                    <div class="bg-slate-925/60 p-3 rounded-lg border border-slate-850">
+                        <div class="text-xs font-bold text-slate-300 mb-2.5">Frontier Model Release Evaluation Node</div>
+                        <div class="space-y-2 relative border-l border-slate-800 pl-4 ml-2">
+                            <div>
+                                <span class="text-slate-500">├──</span> <span class="text-slate-400">Aggregate benchmarks improved?</span>
+                                <span id="graph-node-agg" class="text-slate-400 font-bold ml-1">PENDING</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500">├──</span> <span class="text-slate-400">Slice regression detected?</span>
+                                <span id="graph-node-slice" class="text-slate-400 font-bold ml-1">PENDING</span>
+                            </div>
+                            <div class="pl-4">
+                                <span class="text-slate-600">└──</span> <span class="text-slate-500">Critical subgroups:</span>
+                                <span id="graph-node-slice-sub" class="text-slate-500 ml-1">--</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500">├──</span> <span class="text-slate-400">Safety guardrail breach?</span>
+                                <span id="graph-node-guard" class="text-slate-400 font-bold ml-1">PENDING</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500">├──</span> <span class="text-slate-400">Citation support passed?</span>
+                                <span id="graph-node-citation" class="text-slate-400 font-bold ml-1">PENDING</span>
+                            </div>
+                            <div>
+                                <span class="text-slate-500">├──</span> <span class="text-slate-400">False-go release risk?</span>
+                                <span id="graph-node-falsego" class="text-slate-400 font-bold ml-1">PENDING</span>
+                            </div>
+                            <div class="pt-1">
+                                <span class="text-slate-500">└──</span> <span class="text-indigo-400 font-bold">Policy verdict:</span>
+                                <span id="graph-node-verdict" class="bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/20 font-bold ml-1">IDLE</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="text-[10px] text-slate-500 leading-normal bg-slate-925/40 p-2.5 rounded border border-slate-900">
+                        Every branch above is computed live by <span class="text-slate-400">evaluatePolicy(state)</span> against the registry thresholds — nothing is hardcoded per scenario. Flip an injection toggle and re-run to watch the tree re-derive.
+                    </div>
+                </div>
+
+                <!-- Verification hierarchy -->
+                <div class="bg-slate-925/60 border border-slate-900 p-4 rounded-xl space-y-2.5 shrink-0">
+                    <div class="flex items-center justify-between">
+                        <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">Verification Validation Hierarchy</h3>
+                        <span class="text-[9px] text-slate-600 font-mono">✓ pass · ✕ fail · ↻ repaired · ⤴ overridden · ! flagged</span>
+                    </div>
+                    <div class="grid grid-cols-5 gap-1.5 text-[9px] font-mono text-center" role="status" aria-label="Validation level statuses">
+                        <div class="py-1.5 rounded border font-bold bg-slate-900 text-slate-600 border-slate-850" id="val-l1">L1 Schema</div>
+                        <div class="py-1.5 rounded border font-bold bg-slate-900 text-slate-600 border-slate-850" id="val-l2">L2 Citation</div>
+                        <div class="py-1.5 rounded border font-bold bg-slate-900 text-slate-600 border-slate-850" id="val-l3">L3 Precision</div>
+                        <div class="py-1.5 rounded border font-bold bg-slate-900 text-slate-600 border-slate-850" id="val-l4">L4 Slice</div>
+                        <div class="py-1.5 rounded border font-bold bg-slate-900 text-slate-600 border-slate-850" id="val-l5">L5 Policy</div>
+                    </div>
+                    <p class="text-[10px] text-slate-500 leading-normal">L1 schema · L2 citation grounding · L3 numeric precision · L4 slice integrity · L5 policy gate. An L2 human override never clears a data-driven L4 hold.</p>
+                </div>
+            </div>
+
+            <!-- ───────── Right Column: Decision Packet (Memo / JSON State) ───────── -->
+            <div class="xl:col-span-4 bg-slate-950 p-5 flex flex-col gap-4 xl:overflow-y-auto custom-scrollbar">
+                <div class="flex items-center justify-between border-b border-slate-900 pb-3 shrink-0">
+                    <div class="flex items-center gap-2">
+                        <span class="h-2 w-2 rounded-full bg-slate-700" id="artifact-status-dot" aria-hidden="true"></span>
+                        <h2 class="text-[11px] font-bold text-slate-300 uppercase tracking-wider font-mono">AI Release Risk Memo</h2>
+                    </div>
+                    <div class="flex items-center gap-1 bg-slate-925 p-0.5 rounded-lg border border-slate-800" role="group" aria-label="Artifact view">
+                        <button onclick="toggleArtifactView('memo')" id="btn-view-memo" class="text-[10px] font-mono px-2.5 py-1 rounded bg-slate-800 text-emerald-300 font-bold">MEMO</button>
+                        <button onclick="toggleArtifactView('state')" id="btn-view-state" class="text-[10px] font-mono px-2.5 py-1 rounded text-slate-500 hover:text-slate-200 transition-colors">JSON STATE</button>
+                    </div>
+                </div>
+
+                <div class="flex-1 flex flex-col gap-4 min-h-0">
+                    <!-- Memo view -->
+                    <div id="memo-artifact-container" class="space-y-4">
+                        <div id="memo-placeholder" class="text-xs text-slate-500 font-mono text-center py-24 bg-slate-925/20 border border-dashed border-slate-900 rounded-2xl px-4 leading-relaxed">
+                            Select an incident scenario and run the release pipeline to synthesize the decision packet.
+                        </div>
+
+                        <!-- Active memo card -->
+                        <div id="memo-active-card" class="hidden bg-slate-925/30 border border-slate-900 rounded-2xl p-4 space-y-4">
+                            <div class="flex items-center justify-between text-[9px] text-slate-500 font-mono">
+                                <span id="memo-meta-job-id">JOB ID: --</span>
+                                <span id="memo-mode" class="text-slate-500">DECISION PACKET</span>
+                            </div>
+
+                            <!-- LAUNCH POLICY HERO (signature element) -->
+                            <div id="memo-hero" class="bracket-frame bg-slate-950 border border-slate-900 rounded-sm p-4 space-y-3">
+                                <span class="text-[10px] text-slate-500 block uppercase font-mono font-bold tracking-widest">Launch Policy Verdict</span>
+                                <div id="memo-recommendation-badge" class="font-mono font-bold tracking-wider text-lg leading-tight text-slate-300">--</div>
+                                <div class="grid grid-cols-1 gap-1.5 text-xs pt-1 border-t border-slate-900">
+                                    <div class="flex justify-between items-center pt-1.5">
+                                        <span class="text-slate-500">Rollout status</span>
+                                        <span class="font-bold font-mono text-[11px]" id="memo-rollout-status">--</span>
+                                    </div>
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-slate-500">Required sign-off</span>
+                                        <span class="text-slate-300 font-mono text-[11px] text-right" id="memo-required-owner">--</span>
+                                    </div>
+                                    <div class="flex justify-between items-center">
+                                        <span class="text-slate-500">False-go risk</span>
+                                        <span class="font-bold font-mono px-1.5 py-0.5 rounded text-[10px] border" id="memo-falsego-risk">--</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Aggregate-metric trap detector -->
+                            <div id="memo-trap-detector-container" class="hidden bg-rose-500/10 border border-rose-500/25 rounded-xl p-3">
+                                <div class="flex items-center gap-2 text-rose-400 font-bold text-xs">
+                                    <svg class="h-4 w-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                                    </svg>
+                                    <span>Aggregate-Metric Trap Detected</span>
+                                </div>
+                                <p class="text-[10px] text-rose-300 mt-1 leading-normal" id="memo-trap-message"></p>
+                            </div>
+
+                            <!-- Reason codes -->
+                            <div class="bg-slate-950 border border-slate-900 rounded-xl p-3">
+                                <span class="text-[9px] text-slate-500 block uppercase font-mono mb-1">Reason Codes</span>
+                                <div class="text-[11px] font-mono font-bold text-amber-400" id="memo-reason-code">NONE</div>
+                            </div>
+
+                            <!-- Model pipeline comparison -->
+                            <div class="bg-slate-950 border border-slate-900 rounded-xl p-3 space-y-2">
+                                <div class="flex justify-between text-[9px] text-slate-500 font-mono border-b border-slate-900 pb-1.5">
+                                    <span>MODEL PIPELINE COMPARISON</span>
+                                    <span id="memo-suite-ver">EVALS_--</span>
+                                </div>
+                                <div class="grid grid-cols-2 gap-3 text-xs">
+                                    <div>
+                                        <span class="text-[10px] text-slate-500 block">Baseline</span>
+                                        <span class="font-mono text-slate-300 font-semibold break-all text-[11px]" id="memo-base-model">--</span>
+                                    </div>
+                                    <div>
+                                        <span class="text-[10px] text-slate-500 block">Candidate</span>
+                                        <span class="font-mono text-slate-300 font-semibold break-all text-[11px]" id="memo-cand-model">--</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Slice regression table -->
+                            <div id="memo-slice-container" class="space-y-2 hidden">
+                                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-mono">Detected Slice Regressions</span>
+                                <div class="bg-slate-950 border border-slate-900 rounded-xl overflow-x-auto p-2.5">
+                                    <table class="w-full text-left text-[10px] font-mono text-slate-400">
+                                        <thead>
+                                            <tr class="text-slate-500 border-b border-slate-900">
+                                                <th class="pb-1.5 pr-2 font-semibold">Subgroup slice</th>
+                                                <th class="pb-1.5 text-center font-semibold">Base</th>
+                                                <th class="pb-1.5 text-center font-semibold">Cand</th>
+                                                <th class="pb-1.5 text-right font-semibold">Delta</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="memo-slice-table-body"></tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <!-- Executive summary -->
+                            <div class="space-y-1.5">
+                                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-mono">1 · Operational Analysis Memo</span>
+                                <p class="text-xs text-slate-300 leading-relaxed bg-slate-950/60 p-3 rounded-xl border border-slate-900" id="memo-summary-text">Processing run…</p>
+                            </div>
+
+                            <!-- Rollback triggers -->
+                            <div class="bg-slate-950 border border-slate-900 rounded-xl p-3 space-y-1.5">
+                                <span class="text-[9px] text-slate-500 block uppercase font-mono">Rollback Trigger Conditions</span>
+                                <div class="text-[10px] font-mono space-y-1 text-slate-300" id="memo-rollback-conditions"></div>
+                            </div>
+
+                            <!-- Post-release monitoring plan -->
+                            <div id="memo-monitoring-container" class="hidden bg-slate-950 border border-slate-900 rounded-xl p-3 space-y-1.5">
+                                <span class="text-[9px] text-slate-500 block uppercase font-mono">Post-Release Monitoring Plan</span>
+                                <div class="text-[10px] font-mono space-y-1 text-emerald-400" id="memo-monitoring-plan"></div>
+                            </div>
+
+                            <!-- Cost-adjusted routing -->
+                            <div class="bg-slate-950 border border-slate-900 rounded-xl p-3 space-y-1.5">
+                                <span class="text-[9px] text-slate-500 block uppercase font-mono">Cost-Adjusted Routing Strategy</span>
+                                <p class="text-[10px] text-slate-300 leading-normal" id="memo-routing-recommendation">Determining routing matrix…</p>
+                            </div>
+
+                            <!-- Human accountability log -->
+                            <div class="bg-slate-950 border border-slate-900 rounded-xl p-3 space-y-1.5">
+                                <span class="text-[9px] text-slate-500 block uppercase font-mono">Human Accountability Log</span>
+                                <div class="text-[10px] font-mono space-y-1" id="memo-approval-log-ui">
+                                    <div class="text-slate-500">No events logged.</div>
+                                </div>
+                            </div>
+
+                            <!-- Grounded citations -->
+                            <div class="space-y-1.5">
+                                <span class="text-[10px] font-bold text-slate-400 uppercase tracking-wider block font-mono">2 · Grounded Citation Trace</span>
+                                <div class="space-y-1.5 text-[11px]" id="memo-citations-list"></div>
+                            </div>
+
+                            <div class="pt-2 border-t border-slate-800 flex justify-between items-center text-[9px] text-slate-500 font-mono">
+                                <span>STATE VERSION: <span id="memo-state-ver" class="text-slate-400">--</span></span>
+                                <span>UNSUPPORTED ESCAPE: <span id="memo-escape-status" class="text-slate-400">--</span></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Raw JSON state view -->
+                    <div id="state-artifact-container" class="hidden flex-1 bg-slate-925/40 border border-slate-900 rounded-2xl p-4 font-mono text-[11px] overflow-y-auto custom-scrollbar relative min-h-[360px]">
+                        <button onclick="copyState()" id="copy-state-btn" class="absolute right-3 top-3 z-10 bg-slate-850 hover:bg-slate-800 text-slate-400 hover:text-white px-2 py-1 rounded text-[10px] border border-slate-800 transition-colors">Copy state</button>
+                        <pre class="text-emerald-400/90 whitespace-pre-wrap break-words pr-16" id="state-viewer">Awaiting run…</pre>
+                    </div>
+
+                    <!-- Human-in-the-loop triage module -->
+                    <div id="triage-interaction-pane" class="hidden bg-slate-925/80 border border-amber-500/25 rounded-2xl p-4 flex-col gap-3 shadow-glow-amber shrink-0">
+                        <div>
+                            <span class="text-xs font-bold text-amber-400 flex items-center gap-1.5">
+                                <span class="h-1.5 w-1.5 rounded-full bg-amber-400 animate-pulse" aria-hidden="true"></span>
+                                Human Gate Triggered — L2 Citation Failure
+                            </span>
+                            <p class="text-[10px] text-slate-400 mt-1.5 leading-relaxed" id="triage-context">
+                                The validation engine flagged claims whose source spans could not be verified. The full decision packet is rendered above for review. An override clears the citation gate only — data-driven slice and guardrail gates still apply.
+                            </p>
+                        </div>
+                        <div>
+                            <label for="triage-rationale" class="block text-[10px] font-semibold text-slate-400 mb-1 uppercase font-mono">Reviewer rationale (recorded in audit log)</label>
+                            <textarea id="triage-rationale" rows="2" placeholder="e.g. Source spans re-verified manually against eval_suite_summary.json…" class="w-full bg-slate-950 border border-slate-800 rounded-lg px-3 py-2 text-[11px] text-slate-300 focus:outline-none focus:ring-1 focus:ring-amber-500 resize-none font-mono"></textarea>
+                        </div>
+                        <div class="flex gap-2">
+                            <button onclick="resolveTriage(true)" class="flex-1 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold py-2 rounded-lg text-xs transition-colors">Override citation gate &amp; resume</button>
+                            <button onclick="resolveTriage(false)" class="flex-1 bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold py-2 rounded-lg text-xs transition-colors">Reject &amp; block release</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================= TAB 2: CAPABILITY SURFACE MAP ============================= -->
+        <section id="tab-capability" role="tabpanel" aria-labelledby="btn-capability" class="tab-content hidden flex-1 p-5 md:p-8 overflow-y-auto custom-scrollbar bg-slate-950/60">
+            <div class="max-w-5xl mx-auto space-y-6">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-3">
+                    <div>
+                        <h2 class="text-xl font-bold tracking-tight text-slate-100">Capability Surface Map</h2>
+                        <p class="text-xs text-slate-400 mt-1 max-w-2xl leading-relaxed">AI models do not regress globally — they warp across distinct capability planes. Delta thresholds, exposure indices, and per-plane release policies are mapped below for the scenario selected in the simulator.</p>
+                    </div>
+                    <span class="text-[10px] font-mono text-indigo-300 bg-indigo-500/10 border border-indigo-500/20 px-2.5 py-1 rounded-lg shrink-0">ACTIVE PROFILE: <span id="cap-scenario-label" class="font-bold">--</span></span>
+                </div>
+
+                <!-- Capability cards (rendered from SCENARIO_CAPABILITIES) -->
+                <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="capability-cards-grid"></div>
+
+                <!-- Benchmark reliability auditor -->
+                <div class="border border-slate-900 bg-slate-950 rounded-2xl p-6 space-y-4">
+                    <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-wider font-mono">Benchmark Reliability Auditor</h3>
+                    <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 text-xs">
+                        <div class="bg-slate-925/60 p-4 rounded-xl border border-slate-900">
+                            <span class="text-slate-500 block text-[10px] font-mono">CONTAMINATION RISK</span>
+                            <span class="font-bold text-amber-400 mt-1 block">MEDIUM-HIGH</span>
+                            <p class="text-[10px] text-slate-400 mt-1.5 leading-normal">Candidate training data shows public web-log leakage on standard coding benchmark lines; public-benchmark deltas are down-weighted accordingly.</p>
+                        </div>
+                        <div class="bg-slate-925/60 p-4 rounded-xl border border-slate-900">
+                            <span class="text-slate-500 block text-[10px] font-mono">SATURATION RISK</span>
+                            <span class="font-bold text-emerald-400 mt-1 block">LOW</span>
+                            <p class="text-[10px] text-slate-400 mt-1.5 leading-normal">Evaluations use private US/UK enterprise holdout sets — legal, financial-compliance, citation-grounding, and agentic workflow tasks — to avoid saturated public suites.</p>
+                        </div>
+                        <div class="bg-slate-925/60 p-4 rounded-xl border border-slate-900">
+                            <span class="text-slate-500 block text-[10px] font-mono">TOOL-USE CONDITIONS</span>
+                            <span class="font-bold text-slate-300 mt-1 block">ENABLED (SANDBOXED)</span>
+                            <p class="text-[10px] text-slate-400 mt-1.5 leading-normal">Interleaved API executor traces allowed; tool-execution latency regressions are measured alongside task success.</p>
+                        </div>
+                        <div class="bg-slate-925/60 p-4 rounded-xl border border-slate-900">
+                            <span class="text-slate-500 block text-[10px] font-mono">PRODUCTION RELEVANCE</span>
+                            <span class="font-bold text-indigo-400 mt-1 block tabular">9.4 / 10</span>
+                            <p class="text-[10px] text-slate-400 mt-1.5 leading-normal">Slices modeled directly on verified enterprise client application telemetry fields.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================= TAB 3: EVALUATION BENCHMARKER ============================= -->
+        <section id="tab-evals" role="tabpanel" aria-labelledby="btn-evals" class="tab-content hidden flex-1 p-5 md:p-8 overflow-y-auto custom-scrollbar bg-slate-950/60">
+            <div class="max-w-4xl mx-auto space-y-6">
+                <!-- Honest sandbox disclaimer -->
+                <div class="bg-indigo-950/25 border border-indigo-500/30 text-indigo-300 rounded-xl p-4 flex items-start gap-3">
+                    <svg class="h-5 w-5 text-indigo-400 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div class="text-xs space-y-1">
+                        <p class="font-bold uppercase tracking-wider">Simulated Benchmark Preview</p>
+                        <p class="text-indigo-400/90 leading-relaxed">Operating metrics below are target figures for prototype demonstration. Production benchmarks require connecting your validated historical release datasets, with confidence intervals reported per metric.</p>
+                    </div>
+                </div>
+
+                <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-slate-900 pb-5">
+                    <div>
+                        <h2 class="text-xl font-bold tracking-tight text-slate-100">Release Evaluation Benchmarker</h2>
+                        <p class="text-xs text-slate-400 mt-1">Verify pipeline reliability against a validation set of 100 historical release scenarios with known ground-truth verdicts.</p>
+                    </div>
+                    <button onclick="runEvalBenchmark()" id="btn-run-benchmark" class="bg-indigo-600 hover:bg-indigo-500 active:translate-y-px text-white font-semibold py-2.5 px-4 rounded-xl text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/20 disabled:opacity-50 disabled:cursor-wait shrink-0">
+                        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                        </svg>
+                        <span id="benchmark-btn-label">Execute 100-Run Evaluator Suite</span>
+                    </button>
+                </div>
+
+                <!-- Metrics scoreboard -->
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                    <div class="bg-slate-925/60 border border-slate-900 rounded-2xl p-4">
+                        <span class="text-[9px] text-slate-500 uppercase tracking-wider font-mono">Target Regression Recall</span>
+                        <p class="text-2xl font-bold font-mono text-slate-400 mt-1 tabular" id="eval-metric-task_success">--</p>
+                        <p class="text-[9px] text-slate-500 mt-1">Goal: &gt;99% of true regressions caught</p>
+                    </div>
+                    <div class="bg-slate-925/60 border border-slate-900 rounded-2xl p-4">
+                        <span class="text-[9px] text-slate-500 uppercase tracking-wider font-mono">False-Go Rate</span>
+                        <p class="text-2xl font-bold font-mono text-slate-400 mt-1 tabular" id="eval-metric-falsego">--</p>
+                        <p class="text-[9px] text-slate-500 mt-1">Danger limit: &lt;0.5% shipped-when-should-hold</p>
+                    </div>
+                    <div class="bg-slate-925/60 border border-slate-900 rounded-2xl p-4">
+                        <span class="text-[9px] text-slate-500 uppercase tracking-wider font-mono">Claim-Support Precision</span>
+                        <p class="text-2xl font-bold font-mono text-slate-400 mt-1 tabular" id="eval-metric-support">--</p>
+                        <p class="text-[9px] text-slate-500 mt-1">Goal: &gt;95% citations verified to source spans</p>
+                    </div>
+                    <div class="bg-slate-925/60 border border-slate-900 rounded-2xl p-4">
+                        <span class="text-[9px] text-slate-500 uppercase tracking-wider font-mono">Unsupported Claim Escape</span>
+                        <p class="text-2xl font-bold font-mono text-slate-400 mt-1 tabular" id="eval-metric-escalation">--</p>
+                        <p class="text-[9px] text-slate-500 mt-1">Failure limit: &lt;1% escaping all gates</p>
+                    </div>
+                </div>
+
+                <!-- Run history -->
+                <div class="border border-slate-900 bg-slate-950 rounded-2xl overflow-hidden">
+                    <div class="p-4 border-b border-slate-900 bg-slate-925/40 flex justify-between items-center flex-wrap gap-2">
+                        <span class="text-xs font-bold text-slate-300 uppercase tracking-wider font-mono">Evaluation History Log (Subset)</span>
+                        <span class="text-[10px] text-slate-500 font-mono">Dataset: evals_gold_v1.0.4 · ground-truth labelled</span>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left text-xs font-mono text-slate-400">
+                            <thead>
+                                <tr class="border-b border-slate-900 bg-slate-925/20 text-slate-500 text-[10px]">
+                                    <th class="p-3 font-semibold">RUN ID</th>
+                                    <th class="p-3 font-semibold">RELEASE PROFILE</th>
+                                    <th class="p-3 font-semibold">BASELINE</th>
+                                    <th class="p-3 font-semibold">PIPELINE VERDICT</th>
+                                    <th class="p-3 font-semibold">VS GROUND TRUTH</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-900" id="eval-history-body">
+                                <tr><td class="p-3 text-slate-600" colspan="5">Execute the evaluator suite to populate the run log.</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================= TAB 4: GROSS MARGIN MODELER ============================= -->
+        <section id="tab-financials" role="tabpanel" aria-labelledby="btn-financials" class="tab-content hidden flex-1 p-5 md:p-8 overflow-y-auto custom-scrollbar bg-slate-950/60">
+            <div class="max-w-5xl mx-auto space-y-6">
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight text-slate-100">Enterprise SaaS Gross Margin Modeler</h2>
+                    <p class="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">Dimensionally consistent unit economics: revenue scales with clients × platform fee; COGS scales with clients × evaluations × per-run cost. The optimized router prices cache reads and cache writes asymmetrically; the legacy cascade is derived from the <em>same</em> token volumes with three uncached full-context passes — so the comparison is internally honest.</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Parameters -->
+                    <div class="lg:col-span-5 border border-slate-900 bg-slate-950 rounded-2xl p-5 space-y-5 h-fit">
+                        <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">Model Parameters</h3>
+
+                        <div class="space-y-4">
+                            <div>
+                                <label for="param-clients" class="block text-xs font-semibold text-slate-400 mb-1.5">Enterprise Clients</label>
+                                <div class="flex items-center gap-3">
+                                    <input type="range" id="param-clients" min="1" max="100" step="1" value="12" oninput="recalculateFinancials()" aria-label="Number of enterprise clients" class="flex-1">
+                                    <span class="font-mono text-xs text-slate-200 bg-slate-925 px-2 py-1 rounded w-[5.2rem] text-center tabular" id="display-clients">12</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="param-saas-fee" class="block text-xs font-semibold text-slate-400 mb-1.5">SaaS Platform Fee ($ / client / month)</label>
+                                <div class="flex items-center gap-3">
+                                    <input type="range" id="param-saas-fee" min="100" max="2500" step="50" value="750" oninput="recalculateFinancials()" aria-label="Monthly platform fee per client" class="flex-1">
+                                    <span class="font-mono text-xs text-slate-200 bg-slate-925 px-2 py-1 rounded w-[5.2rem] text-center tabular" id="display-saas-fee">$750</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="param-evals" class="block text-xs font-semibold text-slate-400 mb-1.5">Release Evaluations / Client / Month</label>
+                                <div class="flex items-center gap-3">
+                                    <input type="range" id="param-evals" min="10" max="500" step="10" value="120" oninput="recalculateFinancials()" aria-label="Release evaluations per client per month" class="flex-1">
+                                    <span class="font-mono text-xs text-slate-200 bg-slate-925 px-2 py-1 rounded w-[5.2rem] text-center tabular" id="display-evals">120</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <div class="flex items-center justify-between mb-1.5">
+                                    <label for="param-ctx" class="block text-xs font-semibold text-slate-400">Avg Context per Evaluation (tokens)</label>
+                                    <button onclick="syncTokensFromSimulator()" class="text-[10px] font-mono text-indigo-400 hover:text-indigo-300 underline underline-offset-2">Sync from simulator</button>
+                                </div>
+                                <div class="flex items-center gap-3">
+                                    <input type="range" id="param-ctx" min="10000" max="500000" step="10000" value="180000" oninput="recalculateFinancials()" aria-label="Average context tokens per evaluation" class="flex-1">
+                                    <span class="font-mono text-xs text-slate-200 bg-slate-925 px-2 py-1 rounded w-[5.2rem] text-center tabular" id="display-ctx">180,000</span>
+                                </div>
+                            </div>
+
+                            <div>
+                                <label for="param-cache" class="block text-xs font-semibold text-slate-400 mb-1.5">Prompt Cache Hit Rate (%)</label>
+                                <div class="flex items-center gap-3">
+                                    <input type="range" id="param-cache" min="0" max="95" step="5" value="70" oninput="recalculateFinancials()" aria-label="Prompt cache hit rate percentage" class="flex-1">
+                                    <span class="font-mono text-xs text-emerald-400 bg-emerald-500/5 border border-emerald-500/20 px-2 py-1 rounded w-[5.2rem] text-center tabular" id="display-cache">70%</span>
+                                </div>
+                                <p class="text-[10px] text-slate-500 mt-1.5 leading-normal">Cache reads bill at ~10% of input price; cache misses pay a ~25% write premium. Hit rate is high here because release corpora are re-evaluated repeatedly against stable baselines.</p>
+                            </div>
+                        </div>
+
+                        <div class="border-t border-slate-900 pt-3">
+                            <p class="text-[9px] text-slate-500 leading-relaxed font-mono">Unit prices are illustrative defaults — input $3.00 · cache-read $0.30 · cache-write $3.75 · output $15.00 per 1M tokens. Wire to your provider price book in production.</p>
+                        </div>
+                    </div>
+
+                    <!-- Outputs -->
+                    <div class="lg:col-span-7 space-y-4">
+                        <div class="bg-slate-925/40 border border-slate-900 rounded-xl px-4 py-2.5 flex justify-between items-center text-xs font-mono">
+                            <span class="text-slate-500 uppercase text-[10px]">Monthly Recurring Revenue</span>
+                            <span class="text-slate-100 font-bold tabular" id="fin-revenue">--</span>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <!-- Optimized router -->
+                            <div class="border border-emerald-500/30 bg-emerald-500/[0.03] rounded-2xl p-4 flex flex-col gap-2.5">
+                                <div class="flex justify-between items-start">
+                                    <span class="text-xs font-bold text-emerald-400 uppercase tracking-wider font-mono">Optimized Router</span>
+                                    <span class="px-2 py-0.5 text-[8px] font-bold bg-emerald-500/20 text-emerald-300 rounded">CACHED + ROUTED</span>
+                                </div>
+                                <div>
+                                    <p class="text-3xl font-bold font-mono text-slate-100 tabular" id="fin-new-margin">--</p>
+                                    <p class="text-[10px] text-slate-400">Gross margin</p>
+                                </div>
+                                <div class="h-1.5 bg-slate-900 rounded-full overflow-hidden" aria-hidden="true">
+                                    <div id="fin-new-bar" class="h-full bg-emerald-500 rounded-full transition-all duration-500" style="width:0%"></div>
+                                </div>
+                                <div class="text-[9px] text-slate-500 flex justify-between border-t border-slate-900 pt-2 font-mono">
+                                    <span>COGS: <span id="fin-new-cogs" class="text-slate-300 tabular">--</span></span>
+                                    <span>Profit: <span id="fin-new-profit" class="text-emerald-400 tabular">--</span></span>
+                                </div>
+                                <div class="text-[9px] text-slate-500 font-mono">Per-eval cost: <span id="fin-per-run-new" class="text-slate-300 tabular">--</span></div>
+                            </div>
+
+                            <!-- Legacy cascade -->
+                            <div class="border border-rose-500/20 bg-rose-500/[0.02] rounded-2xl p-4 flex flex-col gap-2.5">
+                                <div class="flex justify-between items-start">
+                                    <span class="text-xs font-bold text-rose-400 uppercase tracking-wider font-mono">Legacy Cascade Loop</span>
+                                    <span class="px-2 py-0.5 text-[8px] font-bold bg-rose-500/10 text-rose-400 rounded">3× UNCACHED PASSES</span>
+                                </div>
+                                <div>
+                                    <p class="text-3xl font-bold font-mono text-slate-400 tabular" id="fin-old-margin">--</p>
+                                    <p class="text-[10px] text-slate-500">Gross margin</p>
+                                </div>
+                                <div class="h-1.5 bg-slate-900 rounded-full overflow-hidden" aria-hidden="true">
+                                    <div id="fin-old-bar" class="h-full bg-rose-500/70 rounded-full transition-all duration-500" style="width:0%"></div>
+                                </div>
+                                <div class="text-[9px] text-slate-600 flex justify-between border-t border-slate-900/60 pt-2 font-mono">
+                                    <span>COGS: <span id="fin-old-cogs" class="text-slate-400 tabular">--</span></span>
+                                    <span>Profit: <span id="fin-old-profit" class="text-slate-400 tabular">--</span></span>
+                                </div>
+                                <div class="text-[9px] text-slate-500 font-mono">Per-eval cost: <span id="fin-per-run-old" class="text-slate-300 tabular">--</span></div>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                            <div class="bg-slate-925/40 border border-slate-900 rounded-xl p-4">
+                                <span class="text-[9px] text-slate-500 uppercase tracking-wider font-mono block">Cost Multiple (Legacy ÷ Optimized)</span>
+                                <p class="text-xl font-bold font-mono text-amber-400 mt-1 tabular" id="fin-cost-multiple">--</p>
+                            </div>
+                            <div class="bg-slate-925/40 border border-slate-900 rounded-xl p-4">
+                                <span class="text-[9px] text-slate-500 uppercase tracking-wider font-mono block">Monthly Cache Savings (vs 0% hit)</span>
+                                <p class="text-xl font-bold font-mono text-emerald-400 mt-1 tabular" id="fin-cache-savings">--</p>
+                            </div>
+                        </div>
+
+                        <div class="border border-slate-900 bg-slate-950 p-4 rounded-2xl space-y-3">
+                            <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-wider font-mono">Per-Evaluation COGS Allocation</h3>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-[10px] text-slate-400 border-b border-slate-900 pb-3">
+                                <div>
+                                    <span class="text-slate-500 block">LLM token input &amp; output</span>
+                                    <span class="font-mono text-slate-200 tabular" id="cogs-detail-tokens">--</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-500 block">Programmatic validators (L1–L5)</span>
+                                    <span class="font-mono text-slate-200">$0.010 per pipeline pass</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-500 block">Ingestion parsers</span>
+                                    <span class="font-mono text-slate-200">$0.005 per release package</span>
+                                </div>
+                                <div>
+                                    <span class="text-slate-500 block">Retry &amp; failure buffer</span>
+                                    <span class="font-mono text-slate-200">+5% router · +12% cascade</span>
+                                </div>
+                            </div>
+                            <p class="text-[9px] text-slate-500 leading-relaxed">
+                                The cascade buffer is larger because uncached multi-pass loops re-pay full input price on every retry. Context volume is the dominant COGS driver — use the sync button to pull the simulator's token spec into this model.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================= TAB 5: CONTRACTS & REGISTRY ============================= -->
+        <section id="tab-registry" role="tabpanel" aria-labelledby="btn-registry" class="tab-content hidden flex-1 p-5 md:p-8 overflow-y-auto custom-scrollbar bg-slate-950/60">
+            <div class="max-w-5xl mx-auto space-y-6">
+                <div>
+                    <h2 class="text-xl font-bold tracking-tight text-slate-100">Canonical Release Schema Registry</h2>
+                    <p class="text-xs text-slate-400 mt-1 max-w-3xl leading-relaxed">The typed contracts enforcing integrity inside the platform. The simulator's JSON state, the policy engine's thresholds, and these contracts share one vocabulary — every literal the UI can display is representable here, including <span class="font-mono text-slate-300">OVERRIDDEN</span> citation states and bounded <span class="font-mono text-slate-300">schema_repair_attempts</span>.</p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                    <!-- Module selector -->
+                    <div class="lg:col-span-5 space-y-2.5">
+                        <h3 class="text-[11px] font-bold text-slate-400 uppercase tracking-wider font-mono">Registry Modules</h3>
+
+                        <button onclick="selectRegistry('pydantic')" id="reg-btn-pydantic" class="reg-btn w-full p-4 rounded-xl text-left border border-emerald-500/30 bg-emerald-500/5 transition-all">
+                            <h4 class="text-xs font-semibold text-slate-100 font-mono">Pydantic Release Contract</h4>
+                            <p class="text-[11px] text-slate-400 mt-1 leading-normal">Models baseline benchmarks, slice regressions, validation states, repair attempts, and the append-only audit log.</p>
+                        </button>
+
+                        <button onclick="selectRegistry('json')" id="reg-btn-json" class="reg-btn w-full p-4 rounded-xl text-left border border-slate-900 hover:border-slate-800 bg-slate-950/40 transition-all">
+                            <h4 class="text-xs font-semibold text-slate-400 font-mono">JSON Schema Validation Spec</h4>
+                            <p class="text-[11px] text-slate-500 mt-1 leading-normal">Structural boundaries preventing pipeline ingestion of invalid configuration formats (L1 gate).</p>
+                        </button>
+
+                        <button onclick="selectRegistry('system-prompt')" id="reg-btn-system-prompt" class="reg-btn w-full p-4 rounded-xl text-left border border-slate-900 hover:border-slate-800 bg-slate-950/40 transition-all">
+                            <h4 class="text-xs font-semibold text-slate-400 font-mono">System Prompt Instructions</h4>
+                            <p class="text-[11px] text-slate-500 mt-1 leading-normal">Worker-level rules and the policy thresholds — identical values to the simulator's live policy engine.</p>
+                        </button>
+
+                        <div class="bg-slate-925/40 border border-slate-900 rounded-xl p-3.5 text-[10px] text-slate-500 leading-relaxed">
+                            <span class="text-slate-400 font-semibold">Design note:</span> telemetry (model runs, token counts, latency, cost) is carried on the state object but is never an input to the verdict — execution logs and decision logic are deliberately separated.
+                        </div>
+                    </div>
+
+                    <!-- Code preview -->
+                    <div class="lg:col-span-7 bg-slate-950 border border-slate-900 rounded-2xl p-5 font-mono text-[11px] flex flex-col relative overflow-hidden h-[520px]">
+                        <div class="flex justify-between items-center border-b border-slate-900 pb-3 mb-4 shrink-0">
+                            <span class="text-slate-400 uppercase tracking-wider text-[10px]" id="reg-file-title">RELEASE_EVALUATION_CONTRACT.PY</span>
+                            <span class="text-[9px] text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded font-bold">SYNCED WITH SIMULATOR</span>
+                        </div>
+                        <div class="flex-1 overflow-y-auto custom-scrollbar">
+                            <pre class="text-slate-300 whitespace-pre-wrap break-words" id="registry-code-viewer">Loading contract…</pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- ============================= FOOTER ============================= -->
+    <footer class="border-t border-slate-900 bg-slate-950 px-4 md:px-6 py-3.5 flex flex-col sm:flex-row items-center justify-between text-[10px] text-slate-500 font-mono gap-2">
+        <div>AI RELEASE RISK COPILOT — DECISION INFRASTRUCTURE SANDBOX</div>
+        <div class="flex items-center gap-4">
+            <span>v2.1.0</span>
+            <span aria-hidden="true">|</span>
+            <span class="text-emerald-500/80">Product Wedge MVP Prototype</span>
+        </div>
+    </footer>
+
+    <!-- ============================= SYSTEM JAVASCRIPT ============================= -->
+    <script>
+        'use strict';
+
+        /* ================================================================
+         *  1. POLICY ENGINE CONSTANTS
+         *  Single source of truth — the registry's system prompt renders
+         *  these same values, so contract and runtime can never drift.
+         * ================================================================ */
+        const POLICY = {
+            CONTEXT_ROUTER_TOKENS: 200000,   // long-context router engagement threshold
+            SLICE_HOLD_DELTA: 0.05,          // |delta| >= 5% on a high/critical slice => HOLD
+            GUARDRAIL_BLOCK_SEVERITY: ['high', 'critical'], // guardrail metric severity => BLOCK
+            ESCAPE_RATE_MAX: 0.01,           // unsupported claim escape ceiling
+            MAX_SCHEMA_REPAIRS: 2            // bounded L1 repair attempts before dead-letter
+        };
+
+        const VERDICT_META = {
+            SHIP_WITH_MONITORING: { label: 'SHIP WITH MONITORING', tone: 'go',    rollout: 'CANARY ACTIVE (5% TRAFFIC)',      owner: 'Platform Engineering Core' },
+            HOLD_FOR_INVESTIGATION: { label: 'HOLD FOR INVESTIGATION', tone: 'hold', rollout: 'BLOCKED (HOLD ACTIVE)',        owner: 'AI Safety Lead + Frontier Model PM' },
+            BLOCK_RELEASE: { label: 'BLOCK RELEASE', tone: 'block', rollout: 'TERMINATED (RELEASE CANCELLED)',                owner: 'AI Safety Committee' },
+            ESCALATE_TO_HUMAN_REVIEW: { label: 'ESCALATE — HUMAN GATE', tone: 'hold', rollout: 'PAUSED (AWAITING HUMAN GATE)', owner: 'Release Duty Officer (HITL)' }
+        };
+
+        const TONE = {
+            go:    { text: 'text-emerald-400', badge: 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30', dot: 'bg-emerald-500 animate-pulse', bracket: 'bracket-go',    machine: 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400' },
+            hold:  { text: 'text-amber-400',   badge: 'bg-amber-500/10 text-amber-300 border-amber-500/30',       dot: 'bg-amber-400 animate-pulse',   bracket: 'bracket-hold',  machine: 'bg-amber-500/10 border-amber-500/30 text-amber-400' },
+            block: { text: 'text-rose-400',    badge: 'bg-rose-500/10 text-rose-300 border-rose-500/30',          dot: 'bg-rose-500 animate-pulse',    bracket: 'bracket-block', machine: 'bg-rose-500/10 border-rose-500/30 text-rose-400' }
+        };
+
+        const FALSEGO_TONE = { LOW: 'go', ELEVATED: 'hold', HIGH: 'block', CRITICAL: 'block' };
+
+        /* ================================================================
+         *  2. RUNTIME GLOBALS & ASYNC UTILITIES
+         *  The pipeline is an async/await orchestrator. Cancellation uses
+         *  an epoch counter: resetSimulation() bumps the epoch, and every
+         *  in-flight step re-checks it after each await — so a mid-run
+         *  reset or scenario switch kills the old run instantly and can
+         *  never mutate the fresh state. Bare sleeps are not cancellable;
+         *  the epoch guard is what makes async safe here.
+         * ================================================================ */
+        let activeUsecase = 'copilot';
+        let activeStep = 0;                  // 0 = idle
+        let runEpoch = 0;                    // bumped on every reset — cancels in-flight pipelines
+        let run = null;                      // { state, decision, overridden }
+        let currentMiddleView = 'topology';
+        let currentArtifactView = 'memo';
+
+        const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+        class PipelineCancelled extends Error {}
+        function guard(epoch) { if (epoch !== runEpoch) throw new PipelineCancelled(); }
+        async function tick(epoch, ms) { await sleep(ms); guard(epoch); }
+        function deepClone(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+        /* ================================================================
+         *  3. CAPABILITY SURFACE DATA (per scenario)
+         * ================================================================ */
+        const SCENARIO_CAPABILITIES = {
+            copilot: [
+                { name: 'Coding', delta: '+12%', dir: 'up', exposure: 'high', risk: 'medium', policy: 'Standard rollout', monitor: '72 hours' },
+                { name: 'Tool Use', delta: '+4%', dir: 'up', exposure: 'medium', risk: 'low', policy: 'Canary monitoring', monitor: '48 hours' },
+                { name: 'US/UK Enterprise Reasoning', delta: '-7.2%', dir: 'down', exposure: 'critical', risk: 'critical', policy: 'Immediate hold', monitor: 'N/A' },
+                { name: 'Cybersecurity', delta: '+1%', dir: 'up', exposure: 'high', risk: 'high', policy: 'Standard rollout', monitor: '72 hours' },
+                { name: 'Reasoning', delta: '+0.8%', dir: 'up', exposure: 'high', risk: 'medium', policy: 'Canary rollout', monitor: '48 hours' },
+                { name: 'Long-Context', delta: '+18%', dir: 'up', exposure: 'medium', risk: 'low', policy: 'Standard rollout', monitor: '24 hours' }
+            ],
+            compliance: [
+                { name: 'Coding', delta: '+2%', dir: 'up', exposure: 'medium', risk: 'low', policy: 'Standard rollout', monitor: '24 hours' },
+                { name: 'Tool Use', delta: '-8%', dir: 'down', exposure: 'high', risk: 'high', policy: 'Feature disabled', monitor: 'Hold' },
+                { name: 'US/UK Enterprise Reasoning', delta: '+0%', dir: 'flat', exposure: 'medium', risk: 'medium', policy: 'Standard rollout', monitor: '24 hours' },
+                { name: 'Cybersecurity', delta: '-14%', dir: 'down', exposure: 'critical', risk: 'critical', policy: 'Immediate block', monitor: 'N/A' },
+                { name: 'Reasoning', delta: '+1.2%', dir: 'up', exposure: 'high', risk: 'medium', policy: 'Standard rollout', monitor: '48 hours' },
+                { name: 'Long-Context', delta: '+4%', dir: 'up', exposure: 'low', risk: 'low', policy: 'Standard rollout', monitor: '24 hours' }
+            ],
+            memo: [
+                { name: 'Coding', delta: '+8%', dir: 'up', exposure: 'high', risk: 'medium', policy: 'Standard rollout', monitor: '48 hours' },
+                { name: 'Tool Use', delta: '+5%', dir: 'up', exposure: 'high', risk: 'medium', policy: 'Standard rollout', monitor: '48 hours' },
+                { name: 'US/UK Enterprise Reasoning', delta: '+2%', dir: 'up', exposure: 'high', risk: 'high', policy: 'Canary 5%', monitor: '72 hours' },
+                { name: 'Cybersecurity', delta: '+0.5%', dir: 'up', exposure: 'medium', risk: 'high', policy: 'Canary 5%', monitor: '72 hours' },
+                { name: 'Reasoning', delta: '+3.1%', dir: 'up', exposure: 'high', risk: 'medium', policy: 'Canary 5%', monitor: '48 hours' },
+                { name: 'Long-Context', delta: '+12%', dir: 'up', exposure: 'high', risk: 'medium', policy: 'Canary 5%', monitor: '48 hours' }
+            ]
+        };
+
+        /* ================================================================
+         *  4. SCENARIO CONFIGURATIONS (immutable raw evaluation data)
+         *  No verdicts, reason codes, trap flags, or risk grades are stored
+         *  here — all of those are DERIVED by evaluatePolicy() at run time.
+         *  metric_deltas carry a `kind` discriminator: aggregate | domain |
+         *  guardrail | latency.
+         * ================================================================ */
+        const USECASES = {
+            copilot: {
+                title: 'Scenario A · Hidden US/UK Enterprise Regression',
+                defaultTokens: 180000,
+                deliverable: 'executive_memo',
+                baselineModel: 'prod_v1.8',
+                candidateModel: 'candidate_frontier_v1.9_enterprise',
+                evalSuiteVersion: 'evals_2026_06_10',
+                rollbackConditions: [
+                    'Regulated workflow task_success drops more than 3% from baseline',
+                    'Jailbreak rate exceeds 1% in policy runs',
+                    'Unsupported claim escape rate exceeds 1%'
+                ],
+                monitoringPlan: [],
+                autoApproval: {
+                    reviewer: 'Evelyn Vance (Lead AI Safety Auditor)',
+                    decision: 'HOLD FOR INVESTIGATION',
+                    rationale: 'L4 slice-integrity gate caught regressions in regulated US/UK enterprise workflow slices. Aggregate improvements do not overrule localized high-stakes failures.',
+                    timestamp: '2026-06-10 14:32 UTC'
+                },
+                initialState: {
+                    task_id: 'release_job_regression_03f9b2',
+                    schema_version: '4.1.0',
+                    state_version: 1,
+                    task_type: 'ai_release_regression_audit',
+                    baseline_model: 'prod_v1.8',
+                    candidate_model: 'candidate_frontier_v1.9_enterprise',
+                    eval_suite_version: 'evals_2026_06_10',
+                    source_documents: ['eval_suite_summary.json', 'regression_drift_analysis.json', 'slice_level_metrics.csv'],
+                    facts: [],
+                    assumptions: [],
+                    risks: [],
+                    metric_deltas: [
+                        { metric: 'overall_frontier_benchmark', kind: 'aggregate', baseline: 0.712, candidate: 0.733, delta: 0.021, severity: 'low' },
+                        { metric: 'enterprise_task_success', kind: 'domain', baseline: 0.923, candidate: 0.881, delta: -0.042, severity: 'high' }
+                    ],
+                    affected_slices: [
+                        { slice_name: 'us_contract_clause_reasoning', metric: 'task_success', baseline: 0.91, candidate: 0.838, delta: -0.072, n: 1240, severity: 'critical' },
+                        { slice_name: 'uk_financial_compliance_qa', metric: 'task_success', baseline: 0.89, candidate: 0.826, delta: -0.064, n: 850, severity: 'high' }
+                    ],
+                    model_runs: [],
+                    validation_results: {
+                        schema_validated: false,
+                        schema_repair_attempts: 0,
+                        citation_verification: 'PENDING',
+                        unsupported_claim_escape_rate: null
+                    },
+                    human_review_status: 'not_required',
+                    approval_event: null,
+                    audit_log: []
+                },
+                workerFact: {
+                    statement: 'US contract clause reasoning slice exhibited a critical task-success drop (-7.2pp, n=1,240)',
+                    source_spans: [{ document_id: 'slice_level_metrics.csv', page: 1, chunk_id: 'chunk_contract_991b', quote_hash: 'sha256_8f3d100c…' }],
+                    confidence: 0.99,
+                    extracted_by_run_id: 'primary_worker_run_01'
+                }
+            },
+            compliance: {
+                title: 'Scenario B · Safety Threshold Guardrail Breach',
+                defaultTokens: 350000,
+                deliverable: 'structured_json',
+                baselineModel: 'prod_v1.8',
+                candidateModel: 'candidate_safety_v1.9',
+                evalSuiteVersion: 'safety_evals_2026_06_10',
+                rollbackConditions: [
+                    'Jailbreak rate exceeds 0.5% in any adversarial suite',
+                    'Adversarial formatting compliance rate drops below 99%'
+                ],
+                monitoringPlan: [],
+                autoApproval: {
+                    reviewer: 'System Automated Gatekeeper',
+                    decision: 'BLOCK RELEASE',
+                    rationale: 'L5 policy gate failed globally: critical security guardrails triggered inside adversarial suites. No human override is permitted on guardrail-class breaches.',
+                    timestamp: '2026-06-10 11:15 UTC'
+                },
+                initialState: {
+                    task_id: 'release_job_guardrail_breach_47c8d9',
+                    schema_version: '4.1.0',
+                    state_version: 1,
+                    task_type: 'ai_release_guardrail_review',
+                    baseline_model: 'prod_v1.8',
+                    candidate_model: 'candidate_safety_v1.9',
+                    eval_suite_version: 'safety_evals_2026_06_10',
+                    source_documents: ['safety_eval_results.json', 'policy_prompt_adversarial_suite.csv', 'format_consistency_failures.log'],
+                    facts: [],
+                    assumptions: [],
+                    risks: [],
+                    metric_deltas: [
+                        { metric: 'jailbreak_rate', kind: 'guardrail', baseline: 0.000, candidate: 0.045, delta: 0.045, severity: 'critical' },
+                        { metric: 'rule_compliance', kind: 'guardrail', baseline: 1.000, candidate: 0.920, delta: -0.080, severity: 'high' }
+                    ],
+                    affected_slices: [
+                        { slice_name: 'adversarial_prompt_suite', metric: 'jailbreak_rate', baseline: 0.000, candidate: 0.045, delta: 0.045, n: 500, severity: 'critical' },
+                        { slice_name: 'policy_formatting_checks', metric: 'conform_rate', baseline: 1.000, candidate: 0.920, delta: -0.080, n: 1500, severity: 'high' }
+                    ],
+                    model_runs: [],
+                    validation_results: {
+                        schema_validated: false,
+                        schema_repair_attempts: 0,
+                        citation_verification: 'PENDING',
+                        unsupported_claim_escape_rate: null
+                    },
+                    human_review_status: 'not_required',
+                    approval_event: null,
+                    audit_log: []
+                },
+                workerFact: {
+                    statement: 'Adversarial jailbreak rate breached security guardrails (4.5% versus 0.0% baseline)',
+                    source_spans: [{ document_id: 'safety_eval_results.json', page: 3, chunk_id: 'chunk_adv_001', quote_hash: 'sha256_fa09e3a1…' }],
+                    confidence: 0.98,
+                    extracted_by_run_id: 'primary_worker_run_01'
+                }
+            },
+            memo: {
+                title: 'Scenario C · Standard Release Profile',
+                defaultTokens: 120000,
+                deliverable: 'executive_memo',
+                baselineModel: 'prod_v1.8',
+                candidateModel: 'candidate_v1.9_standard',
+                evalSuiteVersion: 'standard_release_evals',
+                rollbackConditions: [
+                    'Regulated workflow task_success drops more than 3% from baseline',
+                    'Unsupported claim escape rate exceeds 1%',
+                    'P95 latency increases more than 20% on production transactions'
+                ],
+                monitoringPlan: [
+                    'Monitor regulated workflow slices every 6 hours',
+                    'Alert if unsupported claim escape rate exceeds 1%',
+                    'Review full telemetry after a 72-hour window'
+                ],
+                autoApproval: {
+                    reviewer: 'Maya Chen (Platform Director)',
+                    decision: 'SHIP WITH MONITORING',
+                    rationale: 'Automated checks passed across baseline test vectors. Gradual canary released to track real-time telemetry.',
+                    timestamp: '2026-06-10 16:50 UTC'
+                },
+                initialState: {
+                    task_id: 'release_job_standard_991f2e',
+                    schema_version: '4.1.0',
+                    state_version: 1,
+                    task_type: 'standard_model_release_review',
+                    baseline_model: 'prod_v1.8',
+                    candidate_model: 'candidate_v1.9_standard',
+                    eval_suite_version: 'standard_release_evals',
+                    source_documents: ['candidate_model_eval_summary.json', 'release_notes.md', 'monitoring_baseline_comparison.csv'],
+                    facts: [],
+                    assumptions: [],
+                    risks: [],
+                    metric_deltas: [
+                        { metric: 'aggregate_accuracy', kind: 'aggregate', baseline: 0.912, candidate: 0.931, delta: 0.019, severity: 'none' },
+                        { metric: 'latency_p95_ms', kind: 'latency', baseline: 320, candidate: 305, delta: -15, severity: 'none' }
+                    ],
+                    affected_slices: [],
+                    model_runs: [],
+                    validation_results: {
+                        schema_validated: false,
+                        schema_repair_attempts: 0,
+                        citation_verification: 'PENDING',
+                        unsupported_claim_escape_rate: null
+                    },
+                    human_review_status: 'not_required',
+                    approval_event: null,
+                    audit_log: []
+                },
+                workerFact: {
+                    statement: 'Model metrics are stable across all validation test subsets; no high-severity slice drift detected',
+                    source_spans: [{ document_id: 'candidate_model_eval_summary.json', page: 1, chunk_id: 'chunk_std_base', quote_hash: 'sha256_bc01e23f…' }],
+                    confidence: 0.97,
+                    extracted_by_run_id: 'primary_worker_run_01'
+                }
+            }
+        };
+
+        /* ================================================================
+         *  5. SCHEMA REGISTRY — contracts kept in lockstep with POLICY
+         * ================================================================ */
+        const REGISTRY_CODES = {
+            pydantic: {
+                title: 'RELEASE_EVALUATION_CONTRACT.PY',
+                code: `from pydantic import BaseModel, Field
+from typing import List, Literal, Optional
+
+class SourceSpan(BaseModel):
+    document_id: str
+    page: int
+    chunk_id: str
+    quote_hash: str          # sha256 of the exact quoted span
+
+class Fact(BaseModel):
+    statement: str
+    source_spans: List[SourceSpan] = Field(min_length=1)
+    confidence: float = Field(ge=0.0, le=1.0)
+    extracted_by_run_id: str
+
+class ApprovalEvent(BaseModel):
+    reviewer_id: str
+    role: str
+    decision: Literal["approved", "rejected",
+                      "overrode", "escalated"]
+    rationale: str           # required — no silent approvals
+    timestamp: str           # ISO-8601 UTC
+
+class MetricDelta(BaseModel):
+    metric: str
+    kind: Literal["aggregate", "domain",
+                  "guardrail", "latency"]
+    baseline: float
+    candidate: float
+    delta: float
+    severity: Literal["none", "low", "medium",
+                      "high", "critical"]
+
+class AffectedSlice(BaseModel):
+    slice_name: str
+    metric: str
+    baseline: float
+    candidate: float
+    delta: float
+    n: int                   # sample size — no anecdotes
+    severity: Literal["low", "medium", "high", "critical"]
+
+class ModelRun(BaseModel):
+    run_id: str
+    model: str
+    purpose: str
+    # Telemetry only. Never an input to the verdict.
+
+class ValidationResult(BaseModel):
+    schema_validated: bool
+    schema_repair_attempts: int = Field(ge=0, le=2)
+    citation_verification: Literal[
+        "PENDING", "PASSED",
+        "LEVEL_1_FAILED", "LEVEL_2_FAILED",
+        "OVERRIDDEN"]        # override is a recorded state,
+                             # never a rewrite of the failure
+    numeric_precision_passed: Optional[bool] = None
+    slice_integrity_flagged: Optional[bool] = None
+    policy_gate_result: Optional[str] = None
+    unsupported_claim_escape_rate: Optional[float] = None
+
+class AuditEvent(BaseModel):
+    seq: int
+    ts: str
+    event: str
+    detail: str
+    # Append-only. Events are added, never mutated.
+
+class StateObject(BaseModel):
+    task_id: str
+    schema_version: str
+    state_version: int
+    task_type: str
+    baseline_model: str
+    candidate_model: str
+    eval_suite_version: str
+    source_documents: List[str]
+    facts: List[Fact]
+    metric_deltas: List[MetricDelta]
+    affected_slices: List[AffectedSlice]
+    model_runs: List[ModelRun]
+    validation_results: ValidationResult
+    human_review_status: Literal[
+        "not_required", "required",
+        "approved", "rejected"]
+    approval_event: Optional[ApprovalEvent] = None
+    audit_log: List[AuditEvent]`
+            },
+            json: {
+                title: 'RELEASE_EVALUATION_SCHEMA.JSON',
+                code: `{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "release_evaluation_state.schema.json",
+  "title": "ReleaseEvaluationState",
+  "type": "object",
+  "required": [
+    "task_id", "schema_version", "state_version",
+    "baseline_model", "candidate_model",
+    "metric_deltas", "affected_slices",
+    "validation_results", "human_review_status",
+    "audit_log"
+  ],
+  "properties": {
+    "task_id":        { "type": "string", "pattern": "^release_job_" },
+    "schema_version": { "type": "string", "const": "4.1.0" },
+    "state_version":  { "type": "integer", "minimum": 1 },
+    "metric_deltas": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["metric", "kind", "baseline",
+                     "candidate", "delta", "severity"],
+        "properties": {
+          "kind": { "enum": ["aggregate", "domain",
+                              "guardrail", "latency"] },
+          "severity": { "enum": ["none", "low", "medium",
+                                  "high", "critical"] }
+        }
+      }
+    },
+    "affected_slices": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["slice_name", "delta", "n", "severity"],
+        "properties": {
+          "n": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "validation_results": {
+      "type": "object",
+      "required": ["schema_validated",
+                   "schema_repair_attempts",
+                   "citation_verification"],
+      "properties": {
+        "schema_repair_attempts": {
+          "type": "integer", "minimum": 0, "maximum": 2
+        },
+        "citation_verification": {
+          "enum": ["PENDING", "PASSED",
+                   "LEVEL_1_FAILED", "LEVEL_2_FAILED",
+                   "OVERRIDDEN"]
+        }
+      }
+    },
+    "human_review_status": {
+      "enum": ["not_required", "required",
+               "approved", "rejected"]
+    },
+    "audit_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["seq", "ts", "event", "detail"]
+      }
+    }
+  },
+  "additionalProperties": true
+}`
+            },
+            'system-prompt': {
+                title: 'RELEASE_EVALUATION_INSTRUCTIONS.TXT',
+                code: `ROLE
+You are the primary reasoning worker inside a release
+evaluation pipeline. You read evaluation evidence and
+emit ONLY a JSON state object conforming to
+RELEASE_EVALUATION_CONTRACT (schema 4.1.0).
+
+EVIDENCE RULES
+1. Every fact MUST carry at least one source span
+   (document_id, page, chunk_id, quote_hash).
+2. Never invent metrics. If evidence is absent, record
+   it under "assumptions" — never under "facts".
+3. Telemetry (model runs, tokens, latency, cost) is
+   carried on the state but is NEVER a verdict input.
+
+POLICY THRESHOLDS (identical to runtime POLICY const)
+- Long-context router engages above 200,000 tokens.
+- Slice hold: any high/critical slice with
+  |delta| >= 0.05 (5pp) => HOLD_FOR_INVESTIGATION.
+- Guardrail block: any guardrail-kind metric with
+  severity in {high, critical} => BLOCK_RELEASE.
+  No human override is permitted on this class.
+- Citation gate: an L2 verification failure =>
+  ESCALATE_TO_HUMAN_REVIEW. An approved override is
+  recorded as OVERRIDDEN with reviewer + rationale.
+  It clears the citation gate ONLY — data-driven
+  slice and guardrail gates still apply.
+- Unsupported claim escape rate must be <= 0.01 (1%).
+
+REPAIR LOOP
+- Malformed output triggers a bounded schema repair:
+  at most 2 attempts (schema_repair_attempts <= 2).
+- A third failure dead-letters the job for manual
+  inspection. Repairs are logged, never hidden.
+
+AUDIT DISCIPLINE
+- The audit log is append-only. Failures are recorded
+  as failures; overrides as overrides. A later success
+  never rewrites an earlier failure event.
+- Every human decision requires reviewer_id, role,
+  rationale, and timestamp.
+
+OUTPUT
+Emit the JSON state object only. No prose, no
+markdown fences, no commentary.`
+            }
+        };
+
+        /* ================================================================
+         *  6. EVALUATION BENCHMARK DATA (ground-truth labelled subset)
+         * ================================================================ */
+        const EVAL_HISTORY = [
+            { id: 'RUN-0091', profile: 'Hidden slice regression (legal QA)',      base: 'prod_v1.6', verdict: 'HOLD_FOR_INVESTIGATION', outcome: 'MATCH' },
+            { id: 'RUN-0092', profile: 'Clean standard release',                  base: 'prod_v1.6', verdict: 'SHIP_WITH_MONITORING',   outcome: 'MATCH' },
+            { id: 'RUN-0093', profile: 'Adversarial jailbreak spike',             base: 'prod_v1.7', verdict: 'BLOCK_RELEASE',          outcome: 'MATCH' },
+            { id: 'RUN-0094', profile: 'Citation drift in eval summaries',        base: 'prod_v1.7', verdict: 'ESCALATE_TO_HUMAN_REVIEW', outcome: 'MATCH' },
+            { id: 'RUN-0095', profile: 'Sub-threshold slice noise (-1.2pp)',      base: 'prod_v1.7', verdict: 'SHIP_WITH_MONITORING',   outcome: 'MATCH' },
+            { id: 'RUN-0096', profile: 'Latency regression, metrics stable',      base: 'prod_v1.8', verdict: 'SHIP_WITH_MONITORING',   outcome: 'MISS' },
+            { id: 'RUN-0097', profile: 'Compound: slice + guardrail breach',      base: 'prod_v1.8', verdict: 'BLOCK_RELEASE',          outcome: 'MATCH' },
+            { id: 'RUN-0098', profile: 'Aggregate-up, enterprise slices down',    base: 'prod_v1.8', verdict: 'HOLD_FOR_INVESTIGATION', outcome: 'MATCH' }
+        ];
+
+        /* ================================================================
+         *  7. SHARED UI CLASS VOCABULARY
+         * ================================================================ */
+        const $ = (id) => document.getElementById(id);
+
+        const TAB_ACTIVE = 'tab-btn flex-1 md:flex-none px-3 py-2 rounded-lg text-[11px] font-semibold transition-all bg-slate-800 text-emerald-300 border border-slate-700';
+        const TAB_IDLE   = 'tab-btn flex-1 md:flex-none px-3 py-2 rounded-lg text-[11px] font-medium transition-all text-slate-400 hover:text-slate-200 border border-transparent';
+
+        const UC_ACTIVE  = 'usecase-card p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-left transition-all hover:bg-slate-900';
+        const UC_IDLE    = 'usecase-card p-3 rounded-xl border border-slate-900 bg-slate-950/40 text-left transition-all hover:bg-slate-900 hover:border-slate-800';
+
+        const PILL_ACTIVE = 'text-[10px] font-mono px-2.5 py-1 rounded bg-slate-800 text-emerald-300 font-bold';
+        const PILL_IDLE   = 'text-[10px] font-mono px-2.5 py-1 rounded text-slate-500 hover:text-slate-200 transition-colors';
+
+        const NODE_BASE = 'rounded-xl p-3 flex items-center justify-between transition-all duration-300 border ';
+        const NODE_STYLES = {
+            IDLE:       { node: NODE_BASE + 'border-slate-900 bg-slate-925/40',                 badge: 'text-slate-500' },
+            RUNNING:    { node: NODE_BASE + 'border-indigo-500/40 bg-indigo-500/10 node-running', badge: 'text-indigo-400 font-bold' },
+            SUCCESS:    { node: NODE_BASE + 'border-emerald-500/30 bg-emerald-500/5',           badge: 'text-emerald-400 font-bold' },
+            ERROR:      { node: NODE_BASE + 'border-rose-500/40 bg-rose-500/10',                badge: 'text-rose-400 font-bold' },
+            OVERRIDDEN: { node: NODE_BASE + 'border-amber-500/40 bg-amber-500/10',              badge: 'text-amber-400 font-bold' },
+            BYPASSED:   { node: NODE_BASE + 'border-slate-900 bg-slate-950/30 opacity-60',      badge: 'text-slate-600' }
+        };
+
+        function setNode(n, mode, label) {
+            const el = $('node-' + n);
+            const style = NODE_STYLES[mode];
+            el.className = style.node;
+            const badge = el.querySelector('.status-badge');
+            badge.className = 'status-badge text-[9px] font-mono ' + style.badge;
+            badge.textContent = label;
+        }
+
+        const LEVEL_LABELS = ['L1 Schema', 'L2 Citation', 'L3 Precision', 'L4 Slice', 'L5 Policy'];
+        const LEVEL_STYLES = {
+            IDLE:       { cls: 'bg-slate-900 text-slate-600 border-slate-850',          suffix: '' },
+            RUNNING:    { cls: 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30', suffix: ' …' },
+            PASS:       { cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30', suffix: ' ✓' },
+            FAIL:       { cls: 'bg-rose-500/15 text-rose-400 border-rose-500/40',       suffix: ' ✕' },
+            REPAIRED:   { cls: 'bg-amber-500/10 text-amber-400 border-amber-500/30',    suffix: ' ↻' },
+            OVERRIDDEN: { cls: 'bg-amber-500/10 text-amber-300 border-amber-500/40',    suffix: ' ⤴' },
+            FLAGGED:    { cls: 'bg-rose-500/10 text-rose-300 border-rose-500/30',       suffix: ' !' },
+            HOLD:       { cls: 'bg-amber-500/10 text-amber-400 border-amber-500/30',    suffix: ' !' },
+            BLOCK:      { cls: 'bg-rose-500/15 text-rose-400 border-rose-500/40',       suffix: ' ✕' }
+        };
+
+        function setLevel(n, status) {
+            const el = $('val-l' + n);
+            const style = LEVEL_STYLES[status];
+            el.className = 'py-1.5 rounded border font-bold ' + style.cls;
+            el.textContent = LEVEL_LABELS[n - 1] + style.suffix;
+        }
+
+        const MACHINE_STYLES = {
+            idle:  'bg-slate-900 border-slate-800 text-slate-400',
+            run:   'bg-indigo-500/10 border-indigo-500/30 text-indigo-400 animate-pulse',
+            go:    TONE.go.machine,
+            hold:  TONE.hold.machine,
+            block: TONE.block.machine
+        };
+        function setMachine(label, mode) {
+            const el = $('machine-status');
+            el.className = 'text-[10px] font-mono px-2 py-0.5 rounded border ' + MACHINE_STYLES[mode];
+            el.textContent = label;
+        }
+
+        /* ================================================================
+         *  8. TAB / VIEW / SCENARIO NAVIGATION
+         * ================================================================ */
+        const TAB_IDS = ['simulator', 'capability', 'evals', 'financials', 'registry'];
+
+        function switchTab(tabId) {
+            TAB_IDS.forEach((t) => {
+                const active = t === tabId;
+                $('tab-' + t).classList.toggle('hidden', !active);
+                const btn = $('btn-' + t);
+                btn.className = active ? TAB_ACTIVE : TAB_IDLE;
+                btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            });
+        }
+
+        function selectUsecase(key) {
+            activeUsecase = key;
+            Object.keys(USECASES).forEach((k) => {
+                const card = $('uc-' + k);
+                const active = k === key;
+                card.className = active ? UC_ACTIVE : UC_IDLE;
+                card.querySelector('.uc-title').className = 'uc-title font-semibold text-xs ' + (active ? 'text-slate-100' : 'text-slate-400');
+                const desc = card.querySelector('p');
+                desc.className = 'text-[11px] leading-normal ' + (active ? 'text-slate-400' : 'text-slate-500');
+            });
+            const conf = USECASES[key];
+            $('input-tokens').value = conf.defaultTokens;
+            $('deliverable-type').value = conf.deliverable;
+            $('cap-scenario-label').textContent = conf.title;
+            renderCapabilityCards();
+            resetSimulation();           // also refreshes token display + router badge
+        }
+
+        function updateTokenSlider(val) {
+            const tokens = parseInt(val, 10);
+            $('token-display').textContent = tokens.toLocaleString();
+            if (activeStep === 0) {
+                if (tokens > POLICY.CONTEXT_ROUTER_TOKENS) {
+                    setNode(2, 'IDLE', 'INGEST ARMED');
+                    const badge = $('node-2').querySelector('.status-badge');
+                    badge.className = 'status-badge text-[9px] font-mono text-indigo-400 font-bold';
+                } else {
+                    setNode(2, 'BYPASSED', 'BYPASSED');
+                }
+            }
+        }
+
+        function toggleMiddleView(view) {
+            currentMiddleView = view;
+            const topo = $('mid-topology-view');
+            const graph = $('mid-graph-view');
+            const showGraph = view === 'decision-graph';
+            topo.classList.toggle('hidden', showGraph);
+            graph.classList.toggle('hidden', !showGraph);
+            graph.classList.toggle('flex', showGraph);
+            $('btn-mid-topology').className = showGraph ? PILL_IDLE : PILL_ACTIVE;
+            $('btn-mid-graph').className = showGraph ? PILL_ACTIVE : PILL_IDLE;
+        }
+
+        function toggleArtifactView(view) {
+            currentArtifactView = view;
+            const showState = view === 'state';
+            $('memo-artifact-container').classList.toggle('hidden', showState);
+            $('state-artifact-container').classList.toggle('hidden', !showState);
+            $('btn-view-memo').className = showState ? PILL_IDLE : PILL_ACTIVE;
+            $('btn-view-state').className = showState ? PILL_ACTIVE : PILL_IDLE;
+            if (showState) updateStateViewer();
+        }
+
+        /* ================================================================
+         *  9. STATE / AUDIT PLUMBING
+         * ================================================================ */
+        function pushAudit(event, detail) {
+            const log = run.state.audit_log;
+            log.push({
+                seq: log.length + 1,
+                ts: new Date().toISOString().slice(11, 19) + ' UTC',
+                event: event,
+                detail: detail
+            });
+            run.state.state_version += 1;
+            updateStateViewer();
+        }
+
+        function updateStateViewer() {
+            if (run && run.state) {
+                $('state-viewer').textContent = JSON.stringify(run.state, null, 2);
+            }
+        }
+
+        function copyState() {
+            if (!run || !run.state) return;
+            const text = JSON.stringify(run.state, null, 2);
+            const btn = $('copy-state-btn');
+            const done = () => {
+                const prev = btn.textContent;
+                btn.textContent = 'Copied ✓';
+                setTimeout(() => { btn.textContent = prev; }, 1500);
+            };
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(text).then(done).catch(() => legacyCopy(text, done));
+            } else {
+                legacyCopy(text, done);
+            }
+        }
+
+        function legacyCopy(text, done) {
+            const ta = document.createElement('textarea');
+            ta.value = text;
+            ta.setAttribute('readonly', '');
+            ta.style.position = 'fixed';
+            ta.style.opacity = '0';
+            document.body.appendChild(ta);
+            ta.select();
+            try { document.execCommand('copy'); done(); } catch (e) { /* clipboard unavailable */ }
+            document.body.removeChild(ta);
+        }
+
+        /* ================================================================
+         *  10. POLICY ENGINE — the verdict is DERIVED, never hardcoded
+         * ================================================================ */
+        function fmtPct(d) {
+            const v = (d * 100);
+            return (v > 0 ? '+' : '') + v.toFixed(1) + 'pp';
+        }
+
+        function evaluatePolicy(state) {
+            const aggregate = state.metric_deltas.find((m) => m.kind === 'aggregate') || null;
+
+            const guardrailBreaches = state.metric_deltas.filter(
+                (m) => m.kind === 'guardrail' && POLICY.GUARDRAIL_BLOCK_SEVERITY.includes(m.severity)
+            );
+
+            const regressedSlices = state.affected_slices.filter(
+                (s) => ['high', 'critical'].includes(s.severity) && Math.abs(s.delta) >= POLICY.SLICE_HOLD_DELTA
+            );
+
+            const trap = !!(aggregate && aggregate.delta > 0 && regressedSlices.some((s) => s.severity === 'critical'));
+
+            const reasons = [];
+            let verdict = 'SHIP_WITH_MONITORING';
+
+            if (regressedSlices.length) {
+                verdict = 'HOLD_FOR_INVESTIGATION';
+                reasons.push('SLICE_INTEGRITY_HOLD (' + regressedSlices.length + ' slice' + (regressedSlices.length > 1 ? 's' : '') + ' ≥5pp)');
+            }
+            if (trap) reasons.push('AGGREGATE_METRIC_TRAP');
+            if (guardrailBreaches.length) {
+                verdict = 'BLOCK_RELEASE';
+                guardrailBreaches.forEach((g) => reasons.push('GUARDRAIL_BREACH (' + g.metric + ')'));
+            }
+
+            // Citation gate: an L2 failure pauses everything for the human gate.
+            if (state.validation_results.citation_verification === 'LEVEL_2_FAILED' && state.human_review_status !== 'rejected') {
+                verdict = 'ESCALATE_TO_HUMAN_REVIEW';
+                reasons.unshift('CITATION_INTEGRITY_FAILURE');
+            }
+
+            // A rejected human gate is terminal, regardless of metric health.
+            if (state.human_review_status === 'rejected') {
+                verdict = 'BLOCK_RELEASE';
+                reasons.unshift('HUMAN_GATE_REJECTED');
+                if (!reasons.includes('CITATION_INTEGRITY_FAILURE')) reasons.push('CITATION_INTEGRITY_FAILURE');
+            }
+
+            let falseGoRisk = 'LOW';
+            if (regressedSlices.length) falseGoRisk = 'ELEVATED';
+            if (trap) falseGoRisk = 'HIGH';
+            if (guardrailBreaches.length) falseGoRisk = 'CRITICAL';
+
+            return { verdict, reasons, aggregate, regressedSlices, guardrailBreaches, trap, falseGoRisk };
+        }
+
+        function buildSummary(conf, state, d) {
+            const parts = [];
+            parts.push('Candidate ' + state.candidate_model + ' was evaluated against ' + state.baseline_model +
+                ' under suite ' + state.eval_suite_version + '.');
+
+            if (d.aggregate) {
+                parts.push('The aggregate metric (' + d.aggregate.metric + ') moved ' + fmtPct(d.aggregate.delta) + '.');
+            }
+            if (d.trap) {
+                const worst = d.regressedSlices.slice().sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+                parts.push('However, ' + d.regressedSlices.length + ' regulated slice(s) regressed beyond the 5pp hold threshold — worst: ' +
+                    worst.slice_name + ' at ' + fmtPct(worst.delta) + ' (n=' + worst.n.toLocaleString() + '). ' +
+                    'The aggregate improvement conceals exactly the failures that carry the most enterprise risk.');
+            } else if (d.regressedSlices.length) {
+                parts.push(d.regressedSlices.length + ' high-severity slice(s) breached the 5pp integrity threshold and trigger an automatic hold.');
+            }
+            if (d.guardrailBreaches.length) {
+                parts.push('Safety guardrails were breached (' + d.guardrailBreaches.map((g) => g.metric).join(', ') +
+                    '). Guardrail-class failures are block-level and accept no human override.');
+            }
+
+            const ev = state.approval_event;
+            if (ev && ev.decision === 'overrode') {
+                parts.push('The L2 citation gate was manually overridden by ' + ev.reviewer_id +
+                    ' with a recorded rationale; data-driven slice and guardrail gates were re-applied after the override.');
+            }
+            if (state.human_review_status === 'rejected') {
+                parts.push('The human reviewer rejected the unverifiable citations; the release is blocked and the rejection is preserved in the audit log.');
+            }
+
+            if (d.verdict === 'SHIP_WITH_MONITORING') {
+                parts.push('All gates passed. The candidate proceeds to a 5% canary with active telemetry and the rollback triggers listed below.');
+            } else if (d.verdict === 'HOLD_FOR_INVESTIGATION') {
+                parts.push('Recommendation: hold the release, route traffic to baseline, and open a slice-level investigation before any retry.');
+            } else if (d.verdict === 'BLOCK_RELEASE') {
+                parts.push('Recommendation: remove the candidate from the deployment queue entirely.');
+            } else {
+                parts.push('The pipeline is paused at the human gate; the full evidence packet above is rendered for reviewer inspection before any decision.');
+            }
+            return parts.join(' ');
+        }
+
+        function routingPlan(conf, tone) {
+            if (tone === 'go') {
+                return 'Route 5% of production traffic to ' + conf.candidateModel + ' (canary); ' + conf.baselineModel +
+                    ' serves the remaining 95%. Auto-rollback is wired to the trigger conditions above; cache-warm the shared release corpus to hold per-eval cost down.';
+            }
+            if (tone === 'hold') {
+                return 'Pin 100% of production traffic to ' + conf.baselineModel + '. Quarantine ' + conf.candidateModel +
+                    ' in the evaluation sandbox; re-run the slice suite after remediation. No customer-facing exposure until the hold clears.';
+            }
+            return conf.candidateModel + ' is removed from the deployment queue. ' + conf.baselineModel +
+                ' remains the sole production route. A new candidate must re-enter the pipeline from the start — no patch-and-promote shortcuts.';
+        }
+
+        /* ================================================================
+         *  11. DECISION GRAPH — every branch computed from run.decision
+         * ================================================================ */
+        function setGraph(id, text, colorCls) {
+            const el = $(id);
+            el.textContent = text;
+            el.className = colorCls + ' font-bold ml-1';
+        }
+
+        function resetDecisionGraph() {
+            setGraph('graph-node-agg', 'PENDING', 'text-slate-400');
+            setGraph('graph-node-slice', 'PENDING', 'text-slate-400');
+            $('graph-node-slice-sub').textContent = '--';
+            $('graph-node-slice-sub').className = 'text-slate-500 ml-1';
+            setGraph('graph-node-guard', 'PENDING', 'text-slate-400');
+            setGraph('graph-node-citation', 'PENDING', 'text-slate-400');
+            setGraph('graph-node-falsego', 'PENDING', 'text-slate-400');
+            const v = $('graph-node-verdict');
+            v.textContent = 'IDLE';
+            v.className = 'bg-indigo-500/10 text-indigo-400 px-1.5 py-0.5 rounded border border-indigo-500/20 font-bold ml-1';
+        }
+
+        function syncDecisionGraphVisuals() {
+            const d = run.decision;
+            if (!d) { resetDecisionGraph(); return; }
+            const vr = run.state.validation_results;
+
+            if (d.aggregate) {
+                const up = d.aggregate.delta > 0;
+                setGraph('graph-node-agg', (up ? 'YES (' : 'NO (') + fmtPct(d.aggregate.delta) + ')', up ? 'text-emerald-400' : 'text-slate-400');
+            } else {
+                setGraph('graph-node-agg', 'NOT ESTABLISHED', 'text-slate-500');
+            }
+
+            if (d.regressedSlices.length) {
+                setGraph('graph-node-slice', 'YES (' + d.regressedSlices.length + ' SLICE' + (d.regressedSlices.length > 1 ? 'S' : '') + ')', 'text-rose-400');
+                const sub = $('graph-node-slice-sub');
+                sub.textContent = d.regressedSlices.map((s) => s.slice_name + ' ' + fmtPct(s.delta)).join(' · ');
+                sub.className = 'text-rose-300 ml-1';
+            } else {
+                setGraph('graph-node-slice', 'NO', 'text-emerald-400');
+                $('graph-node-slice-sub').textContent = 'none above 5pp threshold';
+                $('graph-node-slice-sub').className = 'text-slate-500 ml-1';
+            }
+
+            if (d.guardrailBreaches.length) {
+                setGraph('graph-node-guard', 'YES — BREACH (' + d.guardrailBreaches.map((g) => g.metric).join(', ') + ')', 'text-rose-400');
+            } else {
+                setGraph('graph-node-guard', 'NO', 'text-emerald-400');
+            }
+
+            const citMap = {
+                PENDING: ['PENDING', 'text-slate-400'],
+                PASSED: ['PASSED ✓', 'text-emerald-400'],
+                LEVEL_2_FAILED: ['FAILED (L2) ✕', 'text-rose-400'],
+                OVERRIDDEN: ['OVERRIDDEN ⤴', 'text-amber-400']
+            };
+            const cit = citMap[vr.citation_verification] || citMap.PENDING;
+            setGraph('graph-node-citation', cit[0], cit[1]);
+
+            const fgTone = TONE[FALSEGO_TONE[d.falseGoRisk]];
+            setGraph('graph-node-falsego', d.falseGoRisk, fgTone.text);
+
+            const meta = VERDICT_META[d.verdict];
+            const v = $('graph-node-verdict');
+            v.textContent = meta.label;
+            v.className = 'px-1.5 py-0.5 rounded border font-bold ml-1 ' + TONE[meta.tone].badge;
+        }
+
+        /* ================================================================
+         *  12. DECISION PACKET (memo) — rendered from validated state only
+         * ================================================================ */
+        function populateMemoView(pendingGate) {
+            const conf = USECASES[activeUsecase];
+            const state = run.state;
+            const d = run.decision;
+            const vr = state.validation_results;
+            const meta = VERDICT_META[d.verdict];
+            const tone = TONE[meta.tone];
+
+            $('memo-placeholder').classList.add('hidden');
+            $('memo-active-card').classList.remove('hidden');
+
+            $('memo-meta-job-id').textContent = 'JOB ID: ' + state.task_id.toUpperCase();
+            const mode = $('memo-mode');
+            if (pendingGate) {
+                mode.textContent = 'PENDING HUMAN GATE';
+                mode.className = 'text-amber-400 font-bold';
+            } else {
+                mode.textContent = 'DECISION PACKET';
+                mode.className = 'text-slate-500';
+            }
+
+            $('artifact-status-dot').className = 'h-2 w-2 rounded-full ' + tone.dot;
+            $('memo-hero').className = 'bracket-frame ' + tone.bracket + ' bg-slate-950 border border-slate-900 rounded-sm p-4 space-y-3';
+
+            const badge = $('memo-recommendation-badge');
+            badge.textContent = meta.label;
+            badge.className = 'font-mono font-bold tracking-wider text-lg leading-tight ' + tone.text;
+
+            const rollout = $('memo-rollout-status');
+            rollout.textContent = meta.rollout;
+            rollout.className = 'font-bold font-mono text-[11px] ' + tone.text;
+
+            $('memo-required-owner').textContent = meta.owner;
+
+            const fg = $('memo-falsego-risk');
+            fg.textContent = d.falseGoRisk;
+            fg.className = 'font-bold font-mono px-1.5 py-0.5 rounded text-[10px] border ' + TONE[FALSEGO_TONE[d.falseGoRisk]].badge;
+
+            const trapBox = $('memo-trap-detector-container');
+            if (d.trap) {
+                trapBox.classList.remove('hidden');
+                const worst = d.regressedSlices.slice().sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta))[0];
+                $('memo-trap-message').textContent =
+                    'Aggregate ' + d.aggregate.metric + ' improved ' + fmtPct(d.aggregate.delta) + ', yet ' +
+                    d.regressedSlices.length + ' regulated slice(s) regressed past the 5pp hold threshold (worst: ' +
+                    worst.slice_name + ' ' + fmtPct(worst.delta) + ', n=' + worst.n.toLocaleString() +
+                    '). Aggregates can hide exactly the failures that matter most.';
+            } else {
+                trapBox.classList.add('hidden');
+            }
+
+            const rc = $('memo-reason-code');
+            if (d.reasons.length) {
+                rc.textContent = d.reasons.join(' · ');
+                rc.className = 'text-[11px] font-mono font-bold ' + (meta.tone === 'block' ? 'text-rose-400' : 'text-amber-400');
+            } else {
+                rc.textContent = 'NONE — ALL GATES PASSED';
+                rc.className = 'text-[11px] font-mono font-bold text-emerald-400';
+            }
+
+            $('memo-suite-ver').textContent = state.eval_suite_version.toUpperCase();
+            $('memo-base-model').textContent = state.baseline_model;
+            $('memo-cand-model').textContent = state.candidate_model;
+
+            const sliceBox = $('memo-slice-container');
+            const tbody = $('memo-slice-table-body');
+            tbody.innerHTML = '';
+            if (state.affected_slices.length) {
+                sliceBox.classList.remove('hidden');
+                state.affected_slices.forEach((s) => {
+                    const hot = ['high', 'critical'].includes(s.severity);
+                    const tr = document.createElement('tr');
+                    tr.className = 'border-b border-slate-900/60 last:border-0';
+                    tr.innerHTML =
+                        '<td class="py-1.5 pr-2 ' + (hot ? 'text-rose-300' : 'text-slate-400') + '">' + s.slice_name +
+                        ' <span class="text-slate-600">(n=' + s.n.toLocaleString() + ')</span></td>' +
+                        '<td class="py-1.5 text-center tabular">' + (s.baseline * 100).toFixed(1) + '%</td>' +
+                        '<td class="py-1.5 text-center tabular">' + (s.candidate * 100).toFixed(1) + '%</td>' +
+                        '<td class="py-1.5 text-right font-bold tabular ' + (hot ? 'text-rose-400' : 'text-slate-300') + '">' + fmtPct(s.delta) + '</td>';
+                    tbody.appendChild(tr);
+                });
+            } else {
+                sliceBox.classList.add('hidden');
+            }
+
+            $('memo-summary-text').textContent = buildSummary(conf, state, d);
+
+            $('memo-rollback-conditions').innerHTML = conf.rollbackConditions
+                .map((c) => '<div>▸ ' + c + '</div>').join('');
+
+            const monBox = $('memo-monitoring-container');
+            if (meta.tone === 'go' && conf.monitoringPlan.length) {
+                monBox.classList.remove('hidden');
+                $('memo-monitoring-plan').innerHTML = conf.monitoringPlan
+                    .map((m) => '<div>▸ ' + m + '</div>').join('');
+            } else {
+                monBox.classList.add('hidden');
+            }
+
+            $('memo-routing-recommendation').textContent = routingPlan(conf, meta.tone);
+
+            const logBox = $('memo-approval-log-ui');
+            if (pendingGate) {
+                logBox.innerHTML = '<div class="text-amber-400">Awaiting reviewer decision — pipeline paused at the human gate.</div>';
+            } else if (state.approval_event) {
+                const ev = state.approval_event;
+                const evTone = ev.decision === 'rejected' ? 'text-rose-400' : 'text-amber-400';
+                logBox.innerHTML =
+                    '<div class="' + evTone + ' font-bold">' + ev.reviewer_id + ' (' + ev.role + ') — ' + ev.decision.toUpperCase() + '</div>' +
+                    '<div class="text-slate-400">“' + ev.rationale + '”</div>' +
+                    '<div class="text-slate-600">' + ev.timestamp + '</div>';
+            } else {
+                const ap = conf.autoApproval;
+                logBox.innerHTML =
+                    '<div class="' + tone.text + ' font-bold">' + ap.reviewer + ' — ' + ap.decision + '</div>' +
+                    '<div class="text-slate-400">“' + ap.rationale + '”</div>' +
+                    '<div class="text-slate-600">' + ap.timestamp + '</div>';
+            }
+
+            const citList = $('memo-citations-list');
+            if (state.facts.length) {
+                const chipMap = {
+                    PASSED: ['VERIFIED', 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'],
+                    OVERRIDDEN: ['OVERRIDE', 'bg-amber-500/10 text-amber-400 border-amber-500/30'],
+                    LEVEL_2_FAILED: ['UNVERIFIED', 'bg-rose-500/15 text-rose-400 border-rose-500/40'],
+                    PENDING: ['PENDING', 'bg-slate-900 text-slate-500 border-slate-800']
+                };
+                const chip = chipMap[vr.citation_verification] || chipMap.PENDING;
+                citList.innerHTML = state.facts.map((f) =>
+                    '<div class="bg-slate-950 border border-slate-900 rounded-xl p-2.5 space-y-1.5">' +
+                        '<p class="text-slate-300 leading-normal">' + f.statement + '</p>' +
+                        '<div class="flex flex-wrap items-center gap-1.5 font-mono text-[9px]">' +
+                            f.source_spans.map((sp) =>
+                                '<span class="bg-slate-900 border border-slate-800 text-slate-400 px-1.5 py-0.5 rounded">' +
+                                sp.document_id + '#' + sp.chunk_id + '</span>').join('') +
+                            '<span class="px-1.5 py-0.5 rounded border font-bold ' + chip[1] + '">' + chip[0] + '</span>' +
+                            '<span class="text-slate-600">conf ' + f.confidence.toFixed(2) + '</span>' +
+                        '</div>' +
+                    '</div>'
+                ).join('');
+            } else {
+                citList.innerHTML = '<div class="text-slate-600 font-mono text-[10px]">No facts extracted yet.</div>';
+            }
+
+            $('memo-state-ver').textContent = 'v' + state.state_version;
+            const esc = $('memo-escape-status');
+            if (vr.citation_verification === 'LEVEL_2_FAILED') {
+                esc.textContent = 'UNRESOLVED';
+                esc.className = 'text-rose-400 font-bold';
+            } else if (vr.unsupported_claim_escape_rate !== null) {
+                esc.textContent = (vr.unsupported_claim_escape_rate * 100).toFixed(1) + '% (GOAL ≤1%)';
+                esc.className = 'text-emerald-400 font-bold';
+            } else {
+                esc.textContent = '--';
+                esc.className = 'text-slate-400';
+            }
+        }
+
+        /* ================================================================
+         *  13. SIMULATION LIFECYCLE — async/await orchestrator
+         *  USECASES is never mutated — every run works on a deep clone.
+         *  Every step is awaited; epoch guards make resets race-free.
+         * ================================================================ */
+        function resetSimulation() {
+            runEpoch += 1;                   // cancels any in-flight pipeline
+            activeStep = 0;
+
+            const conf = USECASES[activeUsecase];
+            run = { state: deepClone(conf.initialState), decision: null, overridden: false };
+
+            for (let i = 1; i <= 5; i++) setLevel(i, 'IDLE');
+
+            setNode(1, 'IDLE', 'IDLE');
+            setNode(3, 'IDLE', 'IDLE');
+            setNode(4, 'IDLE', 'IDLE');
+            setNode(5, 'IDLE', 'IDLE');
+            setNode(6, 'IDLE', 'IDLE');
+            updateTokenSlider($('input-tokens').value);   // sets node-2 ARMED / BYPASSED
+
+            resetDecisionGraph();
+
+            $('memo-active-card').classList.add('hidden');
+            $('memo-placeholder').classList.remove('hidden');
+            $('memo-trap-detector-container').classList.add('hidden');
+            $('memo-monitoring-container').classList.add('hidden');
+            const triage = $('triage-interaction-pane');
+            triage.classList.add('hidden');
+            triage.classList.remove('flex');
+            $('triage-rationale').value = '';
+
+            const mode = $('memo-mode');
+            mode.textContent = 'DECISION PACKET';
+            mode.className = 'text-slate-500';
+            $('artifact-status-dot').className = 'h-2 w-2 rounded-full bg-slate-700';
+
+            setMachine('IDLE', 'idle');
+            $('run-btn').disabled = false;
+            updateStateViewer();
+        }
+
+        async function startSimulation() {
+            resetSimulation();               // bumps the epoch → any prior run is dead
+            const epoch = runEpoch;
+            $('run-btn').disabled = true;    // double-start prevented here; no lock flag to forget to clear
+            setMachine('RUNNING', 'run');
+            activeStep = 1;
+            try {
+                await tick(epoch, 250);
+                await stepInit(epoch);
+                await stepRouter(epoch);
+                await stepWorker(epoch);
+                const gate = await stepValidate(epoch);
+                if (gate === 'HALT') return; // paused at the human gate — resolveTriage() resumes
+                await continueValidationPostGate(epoch);
+                await stepProse(epoch);
+                await stepGate(epoch);
+                guard(epoch);
+                finalizeRun();
+            } catch (e) {
+                if (!(e instanceof PipelineCancelled)) throw e;
+                // Reset / scenario switch mid-run: stop silently — the UI is already re-initialized.
+            }
+        }
+
+        async function stepInit(epoch) {
+            setNode(1, 'RUNNING', 'REGISTERING');
+            pushAudit('STATE_INIT', 'job ' + run.state.task_id + ' registered · schema v' + run.state.schema_version);
+            await tick(epoch, 650);
+            setNode(1, 'SUCCESS', 'REGISTERED ✓');
+        }
+
+        async function stepRouter(epoch) {
+            activeStep = 2;
+            const tokens = parseInt($('input-tokens').value, 10);
+            if (tokens > POLICY.CONTEXT_ROUTER_TOKENS) {
+                setNode(2, 'RUNNING', 'ROUTING');
+                run.state.model_runs.push({
+                    run_id: 'context_ingestion_router_01',
+                    model: 'long-context-ingestion-router',
+                    purpose: 'chunk + index ' + tokens.toLocaleString() + '-token release corpus'
+                });
+                pushAudit('CONTEXT_ROUTER_ENGAGED', tokens.toLocaleString() + ' tokens > ' + POLICY.CONTEXT_ROUTER_TOKENS.toLocaleString() + ' threshold');
+                await tick(epoch, 650);
+                setNode(2, 'SUCCESS', 'ROUTED ✓');
+            } else {
+                setNode(2, 'BYPASSED', 'BYPASSED');
+                pushAudit('CONTEXT_ROUTER_BYPASSED', tokens.toLocaleString() + ' tokens within direct-context budget');
+                await tick(epoch, 350);
+            }
+        }
+
+        async function stepWorker(epoch) {
+            activeStep = 3;
+            setNode(3, 'RUNNING', 'EXTRACTING');
+            const conf = USECASES[activeUsecase];
+            run.state.model_runs.push({
+                run_id: 'primary_worker_run_01',
+                model: 'primary-reasoning-worker',
+                purpose: 'map regressions and extract citable facts'
+            });
+            run.state.facts.push(deepClone(conf.workerFact));
+            if ($('fail-json').checked) {
+                run.state.malformed_json_raw = '{"task_id": "release_job_… ⟨unterminated string — injected fault⟩';
+                pushAudit('WORKER_OUTPUT_EMITTED', 'raw output captured — malformed JSON fault injected');
+            } else {
+                pushAudit('WORKER_OUTPUT_EMITTED', 'structured state emitted against contract 4.1.0');
+            }
+            await tick(epoch, 700);
+            setNode(3, 'SUCCESS', 'FACTS MAPPED ✓');
+        }
+
+        async function stepValidate(epoch) {
+            activeStep = 4;
+            setNode(4, 'RUNNING', 'VALIDATING');
+            setLevel(1, 'RUNNING');
+            const vr = run.state.validation_results;
+            await tick(epoch, 550);
+
+            if ($('fail-json').checked) {
+                // L1 failure → bounded, visible repair loop. The failure is logged, not erased.
+                setLevel(1, 'FAIL');
+                setNode(4, 'RUNNING', 'REPAIRING ↻ (1/' + POLICY.MAX_SCHEMA_REPAIRS + ')');
+                vr.schema_repair_attempts = 1;
+                pushAudit('SCHEMA_REPAIR_ATTEMPT_1', 'L1 contract violation — bounded re-serialization (max ' + POLICY.MAX_SCHEMA_REPAIRS + ')');
+                await tick(epoch, 850);
+                delete run.state.malformed_json_raw;
+                vr.schema_validated = true;
+                setLevel(1, 'REPAIRED');
+                pushAudit('SCHEMA_REPAIR_SUCCEEDED', 'L1 satisfied after 1 repair attempt');
+            } else {
+                vr.schema_validated = true;
+                setLevel(1, 'PASS');
+            }
+
+            setLevel(2, 'RUNNING');
+            await tick(epoch, 700);
+
+            if ($('fail-validation').checked) {
+                // L2 failure → hard pause. The memo IS rendered so the reviewer
+                // judges with evidence, not blind.
+                vr.citation_verification = 'LEVEL_2_FAILED';
+                run.state.human_review_status = 'required';
+                setLevel(2, 'FAIL');
+                setNode(4, 'ERROR', 'L2 FAILED ✕');
+                setNode(6, 'RUNNING', 'AWAITING HUMAN');
+                setMachine('PAUSED — HUMAN GATE', 'hold');
+                pushAudit('CITATION_VERIFICATION_FAILED', 'source spans could not be verified — escalating to human gate');
+                run.decision = evaluatePolicy(run.state);
+                populateMemoView(true);
+                syncDecisionGraphVisuals();
+                const triage = $('triage-interaction-pane');
+                triage.classList.remove('hidden');
+                triage.classList.add('flex');
+                return 'HALT';
+            }
+
+            vr.citation_verification = 'PASSED';
+            setLevel(2, 'PASS');
+            pushAudit('CITATION_VERIFICATION_PASSED', 'all source spans resolved against quote hashes');
+            return 'CONTINUE';
+        }
+
+        async function continueValidationPostGate(epoch) {
+            setLevel(3, 'RUNNING');
+            await tick(epoch, 550);
+            setLevel(3, 'PASS');
+            run.state.validation_results.numeric_precision_passed = true;
+            pushAudit('NUMERIC_PRECISION_CHECK', 'metric deltas recomputed within tolerance');
+
+            setLevel(4, 'RUNNING');
+            await tick(epoch, 600);
+            const probe = evaluatePolicy(run.state);
+            const flagged = probe.regressedSlices.length > 0 || probe.guardrailBreaches.length > 0;
+            run.state.validation_results.slice_integrity_flagged = flagged;
+            if (flagged) {
+                setLevel(4, 'FLAGGED');
+                pushAudit('SLICE_INTEGRITY_FLAG', probe.regressedSlices.length + ' regressed slice(s) · ' + probe.guardrailBreaches.length + ' guardrail breach(es)');
+            } else {
+                setLevel(4, 'PASS');
+                pushAudit('SLICE_INTEGRITY_CHECK', 'no slice above the 5pp hold threshold');
+            }
+
+            setLevel(5, 'RUNNING');
+            await tick(epoch, 600);
+            const vr = run.state.validation_results;
+            vr.unsupported_claim_escape_rate = 0.0;
+            run.decision = evaluatePolicy(run.state);
+            const meta = VERDICT_META[run.decision.verdict];
+            vr.policy_gate_result = run.decision.verdict;
+            setLevel(5, meta.tone === 'go' ? 'PASS' : meta.tone === 'hold' ? 'HOLD' : 'BLOCK');
+            pushAudit('POLICY_VERDICT_DERIVED', run.decision.verdict + ' — ' + (run.decision.reasons.join('; ') || 'all gates passed'));
+
+            // Node 4 closes with an honest status: overrides and flags stay visible.
+            if (run.overridden) {
+                setNode(4, 'OVERRIDDEN', 'L2 OVERRIDDEN ⤴');
+            } else if (flagged) {
+                setNode(4, 'OVERRIDDEN', 'FLAGS RAISED !');
+            } else {
+                setNode(4, 'SUCCESS', 'ALL GATES PASS ✓');
+            }
+        }
+
+        async function stepProse(epoch) {
+            activeStep = 5;
+            if ($('deliverable-type').value === 'executive_memo') {
+                setNode(5, 'RUNNING', 'SYNTHESIZING');
+                run.state.model_runs.push({
+                    run_id: 'specialist_prose_router_01',
+                    model: 'specialist-prose-synthesizer',
+                    purpose: 'render board-ready memo from validated state only'
+                });
+                pushAudit('PROSE_SYNTHESIS', 'memo rendered from validated state — no free-form generation');
+                await tick(epoch, 700);
+                setNode(5, 'SUCCESS', 'MEMO RENDERED ✓');
+            } else {
+                setNode(5, 'BYPASSED', 'BYPASSED (JSON)');
+                pushAudit('PROSE_BYPASSED', 'structured JSON deliverable — prose specialist skipped');
+                await tick(epoch, 350);
+            }
+        }
+
+        async function stepGate(epoch) {
+            activeStep = 6;
+            setNode(6, 'RUNNING', 'LOGGING');
+            const conf = USECASES[activeUsecase];
+            const ev = run.state.approval_event;
+            await tick(epoch, 650);
+            if (ev && ev.decision === 'overrode') {
+                setNode(6, 'OVERRIDDEN', 'OVERRIDE LOGGED ⤴');
+                pushAudit('APPROVAL_EVENT_RECORDED', ev.reviewer_id + ' — OVERRODE (rationale on file)');
+            } else {
+                setNode(6, 'SUCCESS', 'SIGN-OFF LOGGED ✓');
+                pushAudit('APPROVAL_EVENT_RECORDED', conf.autoApproval.reviewer + ' — ' + conf.autoApproval.decision);
+            }
+        }
+
+        function finalizeRun() {
+            const meta = VERDICT_META[run.decision.verdict];
+            if (meta.tone === 'go') setMachine('COMPLETED — CANARY LIVE', 'go');
+            else if (meta.tone === 'hold') setMachine('COMPLETED — HOLD ACTIVE', 'hold');
+            else setMachine('TERMINATED — BLOCKED', 'block');
+            populateMemoView(false);
+            syncDecisionGraphVisuals();
+            updateStateViewer();
+            $('run-btn').disabled = false;
+            activeStep = 99;
+        }
+
+        /* ================================================================
+         *  14. HUMAN GATE RESOLUTION
+         *  Decisions are recorded on the run state — config is untouched,
+         *  failures are never rewritten, and an L2 override does not
+         *  clear data-driven L4/L5 holds. An approved override resumes
+         *  the SAME epoch-guarded async pipeline.
+         * ================================================================ */
+        function resolveTriage(approve) {
+            const triage = $('triage-interaction-pane');
+            triage.classList.add('hidden');
+            triage.classList.remove('flex');
+
+            const rationale = $('triage-rationale').value.trim() ||
+                (approve
+                    ? 'Source spans re-verified manually against the original eval suite exports.'
+                    : 'Citations could not be independently verified; evidence base insufficient to proceed.');
+
+            run.state.approval_event = {
+                reviewer_id: 'usr_safety_officer_e9',
+                role: 'AI Safety Lead Auditor',
+                decision: approve ? 'overrode' : 'rejected',
+                rationale: rationale,
+                timestamp: new Date().toISOString()
+            };
+
+            if (approve) {
+                run.overridden = true;
+                run.state.validation_results.citation_verification = 'OVERRIDDEN';
+                run.state.human_review_status = 'approved';
+                pushAudit('HUMAN_GATE_OVERRIDE', 'L2 citation gate overridden — “' + rationale + '”');
+                setLevel(2, 'OVERRIDDEN');
+                setNode(4, 'OVERRIDDEN', 'L2 OVERRIDDEN ⤴');
+                setNode(6, 'RUNNING', 'RESUMING');
+                setMachine('RUNNING', 'run');
+                const epoch = runEpoch;      // a reset during the resume cancels it too
+                (async () => {
+                    try {
+                        await tick(epoch, 500);
+                        // Resume the data-driven gates: an override is not a free pass.
+                        await continueValidationPostGate(epoch);
+                        await stepProse(epoch);
+                        await stepGate(epoch);
+                        guard(epoch);
+                        finalizeRun();
+                    } catch (e) {
+                        if (!(e instanceof PipelineCancelled)) throw e;
+                    }
+                })();
+            } else {
+                run.state.human_review_status = 'rejected';
+                pushAudit('HUMAN_GATE_REJECTION', 'release rejected at the human gate — “' + rationale + '”');
+                run.decision = evaluatePolicy(run.state);
+                run.state.validation_results.policy_gate_result = run.decision.verdict;
+                setLevel(5, 'BLOCK');
+                setNode(6, 'ERROR', 'REJECTED — BLOCKED ✕');
+                setMachine('TERMINATED — BLOCKED', 'block');
+                populateMemoView(false);
+                syncDecisionGraphVisuals();
+                updateStateViewer();
+                $('run-btn').disabled = false;
+                activeStep = 99;
+            }
+        }
+
+        /* ================================================================
+         *  15. CAPABILITY SURFACE MAP
+         * ================================================================ */
+        function policyBadgeClass(policy) {
+            const p = policy.toLowerCase();
+            if (p.includes('hold') || p.includes('disabled') || p.includes('block')) {
+                return 'bg-rose-500/15 text-rose-400 border-rose-500/40';
+            }
+            if (p.includes('canary')) {
+                return 'bg-amber-500/10 text-amber-400 border-amber-500/30';
+            }
+            return 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30';
+        }
+
+        function renderCapabilityCards() {
+            const grid = $('capability-cards-grid');
+            const planes = SCENARIO_CAPABILITIES[activeUsecase];
+            grid.innerHTML = planes.map((c) => {
+                const deltaCls = c.dir === 'up' ? 'text-emerald-400' : c.dir === 'down' ? 'text-rose-400' : 'text-slate-400';
+                const sevCls = (lvl) => lvl === 'critical' ? 'text-rose-400 font-bold'
+                    : lvl === 'high' ? 'text-amber-400'
+                    : lvl === 'medium' ? 'text-slate-300'
+                    : 'text-slate-400';
+                return '<div class="bg-slate-950 border border-slate-900 rounded-2xl p-4 space-y-3 hover:border-slate-800 transition-colors">' +
+                    '<div class="flex items-start justify-between gap-2">' +
+                        '<h4 class="text-xs font-bold text-slate-200">' + c.name + '</h4>' +
+                        '<span class="text-base font-bold font-mono tabular ' + deltaCls + '">' + c.delta + '</span>' +
+                    '</div>' +
+                    '<div class="space-y-1.5 text-[10px] font-mono border-t border-slate-900 pt-2.5">' +
+                        '<div class="flex justify-between"><span class="text-slate-500">Exposure index</span><span class="' + sevCls(c.exposure) + ' uppercase">' + c.exposure + '</span></div>' +
+                        '<div class="flex justify-between"><span class="text-slate-500">Risk grade</span><span class="' + sevCls(c.risk) + ' uppercase">' + c.risk + '</span></div>' +
+                        '<div class="flex justify-between items-center"><span class="text-slate-500">Release policy</span>' +
+                            '<span class="px-1.5 py-0.5 rounded border font-bold ' + policyBadgeClass(c.policy) + '">' + c.policy.toUpperCase() + '</span></div>' +
+                        '<div class="flex justify-between"><span class="text-slate-500">Monitor window</span><span class="text-slate-300">' + c.monitor + '</span></div>' +
+                    '</div>' +
+                '</div>';
+            }).join('');
+        }
+
+        /* ================================================================
+         *  16. SCHEMA REGISTRY VIEWER
+         * ================================================================ */
+        const REG_ACTIVE = 'reg-btn w-full p-4 rounded-xl text-left border border-emerald-500/30 bg-emerald-500/5 transition-all';
+        const REG_IDLE   = 'reg-btn w-full p-4 rounded-xl text-left border border-slate-900 hover:border-slate-800 bg-slate-950/40 transition-all';
+
+        function selectRegistry(id) {
+            ['pydantic', 'json', 'system-prompt'].forEach((k) => {
+                const btn = $('reg-btn-' + k);
+                const active = k === id;
+                btn.className = active ? REG_ACTIVE : REG_IDLE;
+                btn.querySelector('h4').className = 'text-xs font-semibold font-mono ' + (active ? 'text-slate-100' : 'text-slate-400');
+                btn.querySelector('p').className = 'text-[11px] mt-1 leading-normal ' + (active ? 'text-slate-400' : 'text-slate-500');
+            });
+            const entry = REGISTRY_CODES[id];
+            $('reg-file-title').textContent = entry.title;
+            $('registry-code-viewer').textContent = entry.code;
+        }
+
+        /* ================================================================
+         *  17. EVALUATION BENCHMARKER
+         * ================================================================ */
+        async function runEvalBenchmark() {
+            const btn = $('btn-run-benchmark');
+            const label = $('benchmark-btn-label');
+            btn.disabled = true;
+            label.textContent = 'Evaluating 100 runs…';
+
+            const targets = {
+                'eval-metric-task_success': { final: '99.2%', cls: 'text-emerald-400' },
+                'eval-metric-falsego':      { final: '0.4%',  cls: 'text-emerald-400' },
+                'eval-metric-support':      { final: '98.7%', cls: 'text-emerald-400' },
+                'eval-metric-escalation':   { final: '0.2%',  cls: 'text-emerald-400' }
+            };
+            Object.keys(targets).forEach((id) => {
+                const el = $(id);
+                el.textContent = '…';
+                el.className = 'text-2xl font-bold font-mono text-indigo-400 mt-1 tabular animate-pulse';
+            });
+
+            await sleep(1400);   // benchmark runs are tab-independent — no epoch guard needed
+            {
+                Object.keys(targets).forEach((id) => {
+                    const el = $(id);
+                    el.textContent = targets[id].final;
+                    el.className = 'text-2xl font-bold font-mono ' + targets[id].cls + ' mt-1 tabular';
+                });
+
+                $('eval-history-body').innerHTML = EVAL_HISTORY.map((r) => {
+                    const meta = VERDICT_META[r.verdict];
+                    const vCls = TONE[meta.tone].text;
+                    const isMatch = r.outcome === 'MATCH';
+                    const oCls = isMatch
+                        ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30'
+                        : 'bg-rose-500/15 text-rose-400 border-rose-500/40';
+                    const oLabel = isMatch ? 'MATCH ✓' : 'MISS — FALSE GO ✕';
+                    return '<tr class="hover:bg-slate-925/40 transition-colors">' +
+                        '<td class="p-3 text-slate-500">' + r.id + '</td>' +
+                        '<td class="p-3 text-slate-300">' + r.profile + '</td>' +
+                        '<td class="p-3 text-slate-500">' + r.base + '</td>' +
+                        '<td class="p-3 font-bold ' + vCls + '">' + meta.label + '</td>' +
+                        '<td class="p-3"><span class="px-1.5 py-0.5 rounded border font-bold text-[10px] ' + oCls + '">' + oLabel + '</span></td>' +
+                    '</tr>';
+                }).join('');
+
+                label.textContent = 'Completed (100 runs) — re-run suite';
+                btn.disabled = false;
+            }
+        }
+
+        /* ================================================================
+         *  18. GROSS MARGIN MODELER — dimensionally consistent unit economics
+         *  Revenue  = clients × platform fee
+         *  COGS     = clients × evals/client × per-run cost
+         *  Optimized: cache-priced single pass. Legacy: 3 uncached passes
+         *  over the SAME token volumes. One vocabulary, honest comparison.
+         * ================================================================ */
+        const PRICE = { INPUT: 3.00, CACHE_READ: 0.30, CACHE_WRITE: 3.75, OUTPUT: 15.00 }; // $ per 1M tokens
+        const RUN_COST = { OUTPUT_TOKENS: 1800, VALIDATORS: 0.010, PARSER: 0.005, ROUTER_BUFFER: 1.05, CASCADE_BUFFER: 1.12 };
+
+        function perRunOptimized(ctxTokens, hitRate) {
+            const inputCost = (ctxTokens / 1e6) * (hitRate * PRICE.CACHE_READ + (1 - hitRate) * PRICE.CACHE_WRITE);
+            const outputCost = (RUN_COST.OUTPUT_TOKENS / 1e6) * PRICE.OUTPUT;
+            return (inputCost + outputCost + RUN_COST.VALIDATORS + RUN_COST.PARSER) * RUN_COST.ROUTER_BUFFER;
+        }
+
+        function perRunLegacy(ctxTokens) {
+            const inputCost = 3 * (ctxTokens / 1e6) * PRICE.INPUT;          // three full uncached passes
+            const outputCost = 3 * (RUN_COST.OUTPUT_TOKENS / 1e6) * PRICE.OUTPUT;
+            return (inputCost + outputCost + RUN_COST.PARSER) * RUN_COST.CASCADE_BUFFER;
+        }
+
+        const fmtUSD = (v) => '$' + v.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+        const fmtUSDc = (v) => '$' + v.toFixed(2);
+
+        function recalculateFinancials() {
+            const clients = parseInt($('param-clients').value, 10);
+            const fee = parseInt($('param-saas-fee').value, 10);
+            const evals = parseInt($('param-evals').value, 10);
+            const ctx = parseInt($('param-ctx').value, 10);
+            const hit = parseInt($('param-cache').value, 10) / 100;
+
+            $('display-clients').textContent = clients;
+            $('display-saas-fee').textContent = '$' + fee.toLocaleString();
+            $('display-evals').textContent = evals;
+            $('display-ctx').textContent = ctx.toLocaleString();
+            $('display-cache').textContent = Math.round(hit * 100) + '%';
+
+            const revenue = clients * fee;
+            const optRun = perRunOptimized(ctx, hit);
+            const legRun = perRunLegacy(ctx);
+            const totalEvals = clients * evals;
+
+            const optCogs = totalEvals * optRun;
+            const legCogs = totalEvals * legRun;
+            const optProfit = revenue - optCogs;
+            const legProfit = revenue - legCogs;
+            const optMargin = revenue > 0 ? (optProfit / revenue) * 100 : 0;
+            const legMargin = revenue > 0 ? (legProfit / revenue) * 100 : 0;
+
+            $('fin-revenue').textContent = fmtUSD(revenue) + ' / mo';
+
+            $('fin-new-margin').textContent = optMargin.toFixed(1) + '%';
+            $('fin-new-bar').style.width = Math.max(0, Math.min(100, optMargin)) + '%';
+            $('fin-new-cogs').textContent = fmtUSD(optCogs);
+            const npEl = $('fin-new-profit');
+            npEl.textContent = (optProfit < 0 ? '-' : '') + fmtUSD(Math.abs(optProfit));
+            npEl.className = (optProfit < 0 ? 'text-rose-400' : 'text-emerald-400') + ' tabular';
+            $('fin-per-run-new').textContent = fmtUSDc(optRun);
+
+            $('fin-old-margin').textContent = legMargin.toFixed(1) + '%';
+            $('fin-old-bar').style.width = Math.max(0, Math.min(100, legMargin)) + '%';
+            $('fin-old-cogs').textContent = fmtUSD(legCogs);
+            const opEl = $('fin-old-profit');
+            opEl.textContent = (legProfit < 0 ? '-' : '') + fmtUSD(Math.abs(legProfit));
+            opEl.className = (legProfit < 0 ? 'text-rose-400' : 'text-slate-400') + ' tabular';
+            $('fin-per-run-old').textContent = fmtUSDc(legRun);
+
+            $('fin-cost-multiple').textContent = (legRun / optRun).toFixed(1) + '×';
+
+            const noCacheRun = perRunOptimized(ctx, 0);
+            const cacheSavings = totalEvals * (noCacheRun - optRun);
+            $('fin-cache-savings').textContent = fmtUSD(cacheSavings) + ' / mo';
+
+            const tokenOnly = (ctx / 1e6) * (hit * PRICE.CACHE_READ + (1 - hit) * PRICE.CACHE_WRITE) +
+                              (RUN_COST.OUTPUT_TOKENS / 1e6) * PRICE.OUTPUT;
+            $('cogs-detail-tokens').textContent = fmtUSDc(tokenOnly) + ' per evaluation (at current cache mix)';
+        }
+
+        function syncTokensFromSimulator() {
+            $('param-ctx').value = $('input-tokens').value;
+            recalculateFinancials();
+        }
+
+        /* ================================================================
+         *  19. BOOT
+         * ================================================================ */
+        window.addEventListener('load', () => {
+            selectUsecase('copilot');     // also resets the simulator
+            selectRegistry('pydantic');
+            recalculateFinancials();
+            toggleMiddleView('topology');
+            toggleArtifactView('memo');
+        });
+    </script>
+</body>
+</html>
