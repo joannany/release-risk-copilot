@@ -37,8 +37,8 @@ It's a single self-contained `index.html` (Tailwind via CDN). Open it in a brows
 
 ## Built with
 
-Designed and built solo, using agentic development tools for implementation while I owned the decision architecture, evaluation logic, and economics modeling end-to-end.
+Designed and prototyped independently with agentic development support, owning the decision architecture, evaluation logic, product framing, and economics modeling end-to-end.
 
 ---
 
-*Anna Jo — [GitHub](https://github.com/joannany) · [LinkedIn](https://www.linkedin.com/in/annajoai)*
+*[LinkedIn](https://www.linkedin.com/in/annajoai)*
